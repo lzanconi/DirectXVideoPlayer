@@ -135,3 +135,8 @@ ID3D11DeviceContext* DXRenderer::GetContext()
 {
 	return context;
 }
+
+ID3D11Device* DXRenderer::GetDevice()
+{
+    return device;
+}

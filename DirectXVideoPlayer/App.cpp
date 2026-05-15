@@ -23,21 +23,21 @@ App::App(int width, int height)
     state.renderer = renderer;
 
     videoShader = new DXShader();
-    videoShader->LoadFromFile(dxRenderer->device, L"shaders.hlsl");
+    videoShader->LoadFromFile(renderer->GetDevice(), L"shaders.hlsl");
 
     bgVideo = new VideoSource();
 	fgVideo = new VideoSource();
 
     //bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
-    bgVideo->OpenFile("Videos/toyota_positional_test_v3_max_speed_accel_bg.mp4", dxRenderer->device, dxRenderer->context);
-    fgVideo->OpenFile("Videos/1.mp4", dxRenderer->device, dxRenderer->context);
+    bgVideo->OpenFile("Videos/toyota_positional_test_v3_max_speed_accel_bg.mp4", renderer->GetDevice(), renderer->GetContext());
+    fgVideo->OpenFile("Videos/1.mp4", renderer->GetDevice(), renderer->GetContext());
     
     bgVideo->looped = true;
     bgVideo->Play(GetTimeStd());
+    //fgVideo->looped = true;
+
 	ShowWindow(window, SW_SHOW);
 	ToggleFullscreen(window);
-
-
 }
 
 App::~App()
