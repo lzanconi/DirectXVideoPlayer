@@ -154,10 +154,12 @@ public:
     double duration = 0.0;
 	double startTime = 0.0; 
     double lastPTS = -1.0;
+	double internalPTS = 0.0;
 	bool isInitialized = false;
 	bool looped = false;
     float fadeInDuration = 2.0f;
     float fadeOutDuration = 2.0f;
+
     
     std::atomic<int64_t> bg_capture_time_ns;
 public:
@@ -263,7 +265,7 @@ public:
     /*
     Manages the decoding loop, converting raw packets from the video stream into displayable DirectX textures while handling timing and looping.
     */
-    bool GetNextFrame(ID3D11DeviceContext* context, double& pts) 
+    bool GetNextFrame(ID3D11DeviceContext* context) 
     {
         if (!isInitialized) 
 			return true; // No frames to decode yet, but not an error
@@ -291,7 +293,7 @@ public:
                         {
                             if (avcodec_receive_frame(decCtx, frame) == 0)
                             {
-                                pts = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
+                                internalPTS = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
                                 CopyFrameToDX11Texture(context, frame);
                                 lastPTS = playPos;
                                 frameDecoded = true;
@@ -343,6 +345,7 @@ public:
     void Play(double startTime)
     {
 		this->startTime = startTime;
+		internalPTS = 0.0;
     }
 
     void Rewind()
@@ -353,6 +356,7 @@ public:
         avcodec_flush_buffers(decCtx);
         av_seek_frame(fmtCtx, streamIdx, 0, AVSEEK_FLAG_BACKWARD);
         lastPTS = -1.0;
+        internalPTS = 0.0;
     }
 
 private:
@@ -597,6 +601,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	bgVideo.looped = true;
 	bgVideo.Play(GetTimeStd());
 
+    //fgVideo.looped = true;
+
     bool fgActive = false;
     double fgPts = 0;
     ShowWindow(hwnd, SW_SHOW);
@@ -614,12 +620,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			fgVideo.Play(GetTimeStd());
         }
 
-        double bgPts;
-        bgVideo.GetNextFrame(g_Renderer.context, bgPts);
+        bgVideo.GetNextFrame(g_Renderer.context);
 
         if (fgActive) 
-        {
-            if (!fgVideo.GetNextFrame(g_Renderer.context, fgPts)) 
+        { 
+            if (!fgVideo.GetNextFrame(g_Renderer.context)) 
                 fgActive = false;
         }
 
@@ -632,16 +637,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         
         if (fgActive) 
         {
-            //float fade = (fgPts < 1.0) ? (float)fgPts : ((fgVideo.duration - fgPts < 1.0) ? (float)(fgVideo.duration - fgPts) : 1.0f);
             float fade = 1.0f;
 
-            if (fgPts < fgVideo.fadeInDuration) {
-                // Fading In: Calculate progress based on fadeInDuration
-                fade = (float)fgPts / fgVideo.fadeInDuration;
+            if (fgVideo.internalPTS < fgVideo.fadeInDuration)
+            {
+                fade = (float)fgVideo.internalPTS / fgVideo.fadeInDuration;
             }
-            else if (fgVideo.duration - fgPts < fgVideo.fadeOutDuration) {
-                // Fading Out: Calculate progress based on fadeOutDuration
-                fade = (float)(fgVideo.duration - fgPts) / fgVideo.fadeOutDuration;
+            else if (fgVideo.duration - fgVideo.internalPTS < fgVideo.fadeOutDuration)
+            {
+                fade = (float)(fgVideo.duration - fgVideo.internalPTS) / fgVideo.fadeOutDuration;
             }
 
             g_Renderer.DrawVideo(fgVideo, videoShader, max(0.0f, fade), true, w, h);
