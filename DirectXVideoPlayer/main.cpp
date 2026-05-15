@@ -156,6 +156,8 @@ public:
     double lastPTS = -1.0;
 	bool isInitialized = false;
 	bool looped = false;
+    float fadeInDuration = 2.0f;
+    float fadeOutDuration = 2.0f;
     
     std::atomic<int64_t> bg_capture_time_ns;
 public:
@@ -630,7 +632,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         
         if (fgActive) 
         {
-            float fade = (fgPts < 1.0) ? (float)fgPts : ((fgVideo.duration - fgPts < 1.0) ? (float)(fgVideo.duration - fgPts) : 1.0f);
+            //float fade = (fgPts < 1.0) ? (float)fgPts : ((fgVideo.duration - fgPts < 1.0) ? (float)(fgVideo.duration - fgPts) : 1.0f);
+            float fade = 1.0f;
+
+            if (fgPts < fgVideo.fadeInDuration) {
+                // Fading In: Calculate progress based on fadeInDuration
+                fade = (float)fgPts / fgVideo.fadeInDuration;
+            }
+            else if (fgVideo.duration - fgPts < fgVideo.fadeOutDuration) {
+                // Fading Out: Calculate progress based on fadeOutDuration
+                fade = (float)(fgVideo.duration - fgPts) / fgVideo.fadeOutDuration;
+            }
+
             g_Renderer.DrawVideo(fgVideo, videoShader, max(0.0f, fade), true, w, h);
         }
         g_Renderer.EndFrame();
