@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <wrl/client.h>
 
 // FFmpeg headers
 extern "C" {
@@ -36,38 +37,11 @@ public:
 };
 #endif
 
-// --- HLSL Shader Source ---
-const char* shaderSource = R"(
-Texture2D texY : register(t0);
-Texture2D texUV : register(t1);
-SamplerState samp : register(s0);
-
-struct VS_INPUT { float3 pos : POSITION; float2 tex : TEXCOORD; };
-struct PS_INPUT { float4 pos : SV_POSITION; float2 tex : TEXCOORD; };
-
-PS_INPUT VS(VS_INPUT input) {
-    PS_INPUT output;
-    output.pos = float4(input.pos, 1.0f);
-    output.tex = input.tex;
-    return output;
-}
-
-cbuffer AlphaBuffer : register(b0) { float alpha; float3 pad; };
-
-float4 PS(PS_INPUT input) : SV_Target {
-    float y = texY.Sample(samp, input.tex).r;
-    float2 uv = texUV.Sample(samp, input.tex).rg - 0.5f;
-    float r = y + 1.5748f * uv.y;
-    float g = y - 0.1873f * uv.x - 0.4681f * uv.y;
-    float b = y + 1.8556f * uv.x;
-    return float4(r, g, b, alpha);
-}
-)";
-
 struct Vertex { float x, y, z; float u, v; };
 
 // --- DXShader Class ---
-class DXShader {
+class DXShader 
+{
 public:
     ID3D11VertexShader* vs = nullptr;
     ID3D11PixelShader* ps = nullptr;
@@ -79,22 +53,118 @@ public:
         if (layout) layout->Release();
     }
 
-    bool Init(ID3D11Device* device, const char* source) {
+    bool LoadFromFile(ID3D11Device* device, const std::wstring& filename) 
+    {
+        if (!CompileVertexShader(device, filename))
+            return false;
+        if (!CompilePixelShader(device, filename))
+            return false;
+
+        return true;
+	}
+
+    bool Init(ID3D11Device* device, const char* source) 
+    {
         ID3DBlob* vsBlob, * psBlob, * errBlob;
-        if (FAILED(D3DCompile(source, strlen(source), nullptr, nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vsBlob, &errBlob))) return false;
-        if (FAILED(D3DCompile(source, strlen(source), nullptr, nullptr, nullptr, "PS", "ps_5_0", 0, 0, &psBlob, &errBlob))) return false;
+        if (FAILED(D3DCompile(source, strlen(source), nullptr, nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vsBlob, &errBlob)))
+        {
+			OutputCompileErrors(errBlob, L"Inline Shader", L"Vertex");
+            return false;
+        }
+        
+        if (FAILED(D3DCompile(source, strlen(source), nullptr, nullptr, nullptr, "PS", "ps_5_0", 0, 0, &psBlob, &errBlob)))
+        {
+			OutputCompileErrors(errBlob, L"Inline Shader", L"Pixel");
+            return false;
+        }
 
         device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vs);
         device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &ps);
 
-        D3D11_INPUT_ELEMENT_DESC ied[] = {
+        D3D11_INPUT_ELEMENT_DESC ied[] = 
+        {
             { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
         };
+
         device->CreateInputLayout(ied, 2, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &layout);
 
         vsBlob->Release(); psBlob->Release();
         return true;
+    }
+
+    bool CompileVertexShader(ID3D11Device* device, const std::wstring& filename)
+    {
+        Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+
+        HRESULT hr = D3DCompileFromFile(
+            filename.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+            "VS", "vs_5_0", 0, 0, &vsBlob, &errorBlob
+        );
+
+        if (FAILED(hr))
+        {
+            OutputCompileErrors(errorBlob.Get(), filename, L"Vertex Shader");
+            return false;
+        }
+
+        hr = device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vs);
+
+        if (FAILED(hr))
+        {
+			std::cerr << "Failed to create vertex shader from file: " << filename.c_str() << std::endl;
+            return false;
+        }
+
+        D3D11_INPUT_ELEMENT_DESC ied[] =
+        {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+        };
+
+        hr = device->CreateInputLayout(ied, 2, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &layout);
+        
+        if (FAILED(hr))
+        {
+			std::cerr << "Failed to create input layout from file: " << filename.c_str() << std::endl;
+            return false;
+        }
+
+        return SUCCEEDED(hr);
+    }
+
+    bool CompilePixelShader(ID3D11Device* device, const std::wstring& filename)
+    {
+        Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+        HRESULT hr = D3DCompileFromFile(
+            filename.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+            "PS", "ps_5_0", 0, 0, &psBlob, &errorBlob
+        );
+
+        if (FAILED(hr))
+        {
+            OutputCompileErrors(errorBlob.Get(), filename, L"Pixel Shader");
+            return false;
+        }
+
+        hr = device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &ps);
+
+        return SUCCEEDED(hr);
+	}
+
+    void OutputCompileErrors(ID3DBlob* errorBlob, const std::wstring& filename, const std::wstring& shaderType)
+    {
+        if (errorBlob)
+        {
+            char* compileErrors = (char*)(errorBlob->GetBufferPointer());
+			std::wcerr << "Error compiling " << shaderType.c_str() << " shader from file " << filename.c_str() << ":\n" << compileErrors << std::endl;
+        }
+        else
+        {
+			std::wcerr << "Could not find or open shader file: " << filename.c_str() << std::endl;
+        }
     }
 };
 
@@ -349,7 +419,8 @@ int main() {
 
     if (!g_Renderer.Init(hwnd)) return -1;
     DXShader videoShader;
-    videoShader.Init(g_Renderer.device, shaderSource);
+    /*videoShader.Init(g_Renderer.device, shaderSource);*/
+	videoShader.LoadFromFile(g_Renderer.device, L"shaders.hlsl");
 
     VideoSource bgVideo, fgVideo;
     // Update these paths to your local files
