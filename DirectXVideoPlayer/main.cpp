@@ -300,10 +300,44 @@ public:
 // --- Window & Main ---
 DXRenderer g_Renderer;
 bool g_Space = false;
+bool isFullscreen = false;
+WINDOWPLACEMENT g_WindowedPlacement = { sizeof(WINDOWPLACEMENT) };
+
+void ToggleFullscreen(HWND hwnd) {
+    isFullscreen = !isFullscreen;
+    if (isFullscreen) {
+        // Save windowed placement and style, then go borderless fullscreen
+        GetWindowPlacement(hwnd, &g_WindowedPlacement);
+        LONG style = GetWindowLong(hwnd, GWL_STYLE);
+        SetWindowLong(hwnd, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
+        MONITORINFO mi = { sizeof(mi) };
+        GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+        SetWindowPos(hwnd, HWND_TOP,
+            mi.rcMonitor.left, mi.rcMonitor.top,
+            mi.rcMonitor.right - mi.rcMonitor.left,
+            mi.rcMonitor.bottom - mi.rcMonitor.top,
+            SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+
+        while (ShowCursor(FALSE) >= 0);
+
+    } else {
+        // Restore windowed style and placement
+        LONG style = GetWindowLong(hwnd, GWL_STYLE);
+        SetWindowLong(hwnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
+        SetWindowPlacement(hwnd, &g_WindowedPlacement);
+        SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+
+        while (ShowCursor(TRUE) < 0);
+    }
+}
 
 LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_DESTROY) PostQuitMessage(0);
     if (m == WM_KEYDOWN && w == VK_SPACE) g_Space = true;
+    if (m == WM_KEYDOWN && w == 'F')
+		ToggleFullscreen(h);
+
     if (m == WM_SIZE && g_Renderer.swapChain) g_Renderer.Resize(0, 0);
     return DefWindowProc(h, m, w, l);
 }
@@ -325,6 +359,7 @@ int main() {
     bool fgActive = false;
     double fgPts = 0;
     ShowWindow(hwnd, SW_SHOW);
+    ToggleFullscreen(hwnd);
 
     MSG msg = { 0 };
     while (msg.message != WM_QUIT) {
