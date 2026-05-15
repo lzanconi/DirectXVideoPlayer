@@ -8,6 +8,7 @@
 #include <vector>
 #include <chrono>
 #include <wrl/client.h>
+#include "utils.h"
 
 // FFmpeg headers
 extern "C" {
@@ -62,36 +63,6 @@ public:
 
         return true;
 	}
-
-    bool Init(ID3D11Device* device, const char* source) 
-    {
-        ID3DBlob* vsBlob, * psBlob, * errBlob;
-        if (FAILED(D3DCompile(source, strlen(source), nullptr, nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vsBlob, &errBlob)))
-        {
-			OutputCompileErrors(errBlob, L"Inline Shader", L"Vertex");
-            return false;
-        }
-        
-        if (FAILED(D3DCompile(source, strlen(source), nullptr, nullptr, nullptr, "PS", "ps_5_0", 0, 0, &psBlob, &errBlob)))
-        {
-			OutputCompileErrors(errBlob, L"Inline Shader", L"Pixel");
-            return false;
-        }
-
-        device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vs);
-        device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &ps);
-
-        D3D11_INPUT_ELEMENT_DESC ied[] = 
-        {
-            { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
-        };
-
-        device->CreateInputLayout(ied, 2, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &layout);
-
-        vsBlob->Release(); psBlob->Release();
-        return true;
-    }
 
     bool CompileVertexShader(ID3D11Device* device, const std::wstring& filename)
     {
@@ -169,65 +140,137 @@ public:
 };
 
 // --- VideoSource Class ---
-class VideoSource {
+class VideoSource 
+{
 public:
     AVFormatContext* fmtCtx = nullptr;
     AVCodecContext* decCtx = nullptr;
     int streamIdx = -1;
-    int width = 0, height = 0;
+    int width = 0; 
+    int height = 0;
     double duration = 0.0;
-
-    ID3D11Texture2D* stagingTex = nullptr;
+	bool isInitialized = false;
+    ID3D11Texture2D* videoTexture = nullptr;
     ID3D11ShaderResourceView* srvY = nullptr, * srvUV = nullptr;
 
-    ~VideoSource() {
-        if (srvY) srvY->Release();
-        if (srvUV) srvUV->Release();
-        if (stagingTex) stagingTex->Release();
-        if (decCtx) avcodec_free_context(&decCtx);
-        if (fmtCtx) avformat_close_input(&fmtCtx);
+public:
+    ~VideoSource() 
+    {
+        if (srvY) 
+            srvY->Release();
+        if (srvUV) 
+            srvUV->Release();
+        if (videoTexture) 
+            videoTexture->Release();
+        if (decCtx) 
+            avcodec_free_context(&decCtx);
+        if (fmtCtx) 
+            avformat_close_input(&fmtCtx);
     }
 
-    bool Open(const std::string& path, ID3D11Device* device, ID3D11DeviceContext* context) {
-        if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0) return false;
-        avformat_find_stream_info(fmtCtx, nullptr);
-        streamIdx = av_find_best_stream(fmtCtx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-        if (streamIdx < 0) return false;
+    /*
+    Responsible for initializing the FFmpeg decoder and setting up the DirectX 11 hardware acceleration resources for a specific video file.
+    */
+    bool OpenFile(const std::string& path, ID3D11Device* device, ID3D11DeviceContext* context) 
+    {
+        //Opens the video file and reads the header to understand the container format
+        if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0)
+        {
+			std::wstring message = L"Failed to open video file: " + stringToWS(path);
+			MessageBox(nullptr, message.c_str(), L"Error", MB_ICONERROR);
+            return false;
+        }
 
+        //Analyzes the file to get detailed information about the streams (video, audio, etc.)
+        avformat_find_stream_info(fmtCtx, nullptr);
+
+        //Specifically searches for the primary video stream within the file and returns its index
+        streamIdx = av_find_best_stream(fmtCtx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+        if (streamIdx < 0) 
+            return false;
+
+        //Looks up the appropriate decoder (like H.264, HEVC, VP9 etc.) based on the video's codec ID
         const AVCodec* codec = avcodec_find_decoder(fmtCtx->streams[streamIdx]->codecpar->codec_id);
+        if (!codec)
+        {
+			std::wstring message = L"Unsupported video codec: " + stringToWS(avcodec_get_name(fmtCtx->streams[streamIdx]->codecpar->codec_id));
+			MessageBox(nullptr, message.c_str(), L"Error", MB_ICONERROR);
+            return false;
+        }
+
+        //Creates a codec context which holds the settings and state for the decoding process
         decCtx = avcodec_alloc_context3(codec);
+
+        //Copies the settings from the file (like resolution and framerate) into the decoder context
         avcodec_parameters_to_context(decCtx, fmtCtx->streams[streamIdx]->codecpar);
 
-        // Hardware Context Setup
+        //Allocates a reference for a hardware device context specifically for DirectX 11 Video Acceleration (D3D11VA).
         AVBufferRef* hw_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+
+        //Retrieves the internal D3D11VA-specific context from the generic hardware device context.
         AVD3D11VADeviceContext* d3d = (AVD3D11VADeviceContext*)((AVHWDeviceContext*)hw_ctx->data)->hwctx;
-        d3d->device = device; device->AddRef();
-        d3d->device_context = context; context->AddRef();
+        
+        //Links the FFmpeg hardware context to the existing DirectX 11 device and increments its reference 
+        //count to prevent it from being deleted.
+        d3d->device = device; 
+        device->AddRef();
+
+        //Links the FFmpeg hardware context to the existing DirectX 11 context (the immediate context) and increments its reference count.
+        d3d->device_context = context; 
+        context->AddRef();
+
+        //Initializes the hardware device context after the D3D11 device and context have been assigned.
         av_hwdevice_ctx_init(hw_ctx);
+
+        //Assigns the initialized hardware context to the decoder, enabling GPU-accelerated decoding.
         decCtx->hw_device_ctx = av_buffer_ref(hw_ctx);
+
+        //Sets a callback function that forces the decoder to output frames in the AV_PIX_FMT_D3D11 format for hardware acceleration.
         decCtx->get_format = [](AVCodecContext*, const AVPixelFormat* pix_fmts) { return AV_PIX_FMT_D3D11; };
+
+        //Decrements the reference count of the local hw_ctx handle, as the decoder now holds its own reference.
         av_buffer_unref(&hw_ctx);
 
-        if (avcodec_open2(decCtx, codec, nullptr) < 0) return false;
+        //Initializes the decoder context with the specified codec. Returns false if the decoder cannot be opened.
+        if (avcodec_open2(decCtx, codec, nullptr) < 0)
+        {
+			MessageBox(nullptr, L"Failed to initialize decoder context!", L"Error", MB_ICONERROR);
+            return false;
+        }
 
-        width = decCtx->width; height = decCtx->height;
+        //Stores the video's width and height in the class members for later use in rendering.
+        width = decCtx->width; 
+        height = decCtx->height;
+
+        //Calculates the total duration of the video in seconds by converting the stream's duration using its time base.
         duration = (fmtCtx->streams[streamIdx]->duration != AV_NOPTS_VALUE) ?
             fmtCtx->streams[streamIdx]->duration * av_q2d(fmtCtx->streams[streamIdx]->time_base) : 0;
 
+		//Marks the video source as successfully initialized, allowing the main loop to start decoding and rendering frames.
+		isInitialized = true;
+
+        //Calls the private CreateResources method to create the necessary DirectX 11 textures and views for rendering the decoded frames
         return CreateResources(device);
     }
 
-    bool GetNextFrame(ID3D11DeviceContext* context, double& pts) {
+    /*
+    Manages the decoding loop, converting raw packets from the video stream into displayable DirectX textures while handling timing and looping.
+    */
+    bool GetNextFrame(ID3D11DeviceContext* context, double& pts) 
+    {
+        if (!isInitialized) 
+			return true; // No frames to decode yet, but not an error
+
         AVPacket* pkt = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
-        bool gotFrame = false;
+        bool frameDecoded = false;
 
         if (av_read_frame(fmtCtx, pkt) >= 0) {
             if (pkt->stream_index == streamIdx && avcodec_send_packet(decCtx, pkt) == 0) {
                 if (avcodec_receive_frame(decCtx, frame) == 0) {
                     pts = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
                     CopyFrameToStaging(context, frame);
-                    gotFrame = true;
+                    frameDecoded = true;
                 }
             }
             av_packet_unref(pkt);
@@ -240,30 +283,76 @@ public:
 
         av_frame_free(&frame);
         av_packet_free(&pkt);
-        return gotFrame;
+        return frameDecoded;
     }
 
 private:
-    bool CreateResources(ID3D11Device* device) {
-        D3D11_TEXTURE2D_DESC td = { (UINT)width, (UINT)height, 1, 1, DXGI_FORMAT_NV12, {1,0}, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE };
-        device->CreateTexture2D(&td, nullptr, &stagingTex);
+    /*
+    Responsible for allocating the DirectX 11 textures and Shader Resource Views (SRVs) required to display 
+    the video frames decoded by FFmpeg.
+    */
+    bool CreateResources(ID3D11Device* device) 
+    {
+        /*
+        This initializes a descriptor for a 2D texture:
+		    -The width and height are set to match the video's dimensions.
+		    -DXGI_FORMAT_NV12 is chosen as the format, which is a common YUV format used in video processing.
+		    -D3D11_BIND_SHADER_RESOURCE flag indicates that this texture will be used as a shader resource, allowing it to be sampled in the pixel shader.
+        */
+        D3D11_TEXTURE2D_DESC td = 
+        { 
+            (UINT)width, 
+            (UINT)height, 1, 1, 
+            DXGI_FORMAT_NV12, 
+            {1,0}, 
+            D3D11_USAGE_DEFAULT, 
+            D3D11_BIND_SHADER_RESOURCE 
+        };
 
-        D3D11_SHADER_RESOURCE_VIEW_DESC yd = { DXGI_FORMAT_R8_UNORM, D3D11_SRV_DIMENSION_TEXTURE2D };
+        /*
+        This calls the DirectX 11 device to actually allocate the memory for the texture on the GPU based on the descriptor above,
+        storing it in videoTexture.
+        */
+        device->CreateTexture2D(&td, nullptr, &videoTexture);
+
+        /*
+        This creates a descriptor for a Shader Resource View(SRV) for the Luminance(Y) channel:
+		    -The format is set to DXGI_FORMAT_R8_UNORM, which means each pixel will be represented by an 8-bit unsigned normalized integer (0-255) 
+             for the Y brightness channel.
+        */
+        D3D11_SHADER_RESOURCE_VIEW_DESC yd = 
+        { 
+            DXGI_FORMAT_R8_UNORM, 
+            D3D11_SRV_DIMENSION_TEXTURE2D 
+        };
+
+        //This specifies that the video texture has only one mipmap level (the full resolution).
         yd.Texture2D.MipLevels = 1;
-        device->CreateShaderResourceView(stagingTex, &yd, &srvY);
 
+        //This creates the SRV for the Y plane, allowing the pixel shader to access the brightness data of the video.
+        device->CreateShaderResourceView(videoTexture, &yd, &srvY);
+
+        //This copies the previous SRV descriptor to use as a starting point for the UV plane.
         D3D11_SHADER_RESOURCE_VIEW_DESC uvd = yd;
+
+        /*
+        This changes the format to DXGI_FORMAT_R8G8_UNORM (two 8-bit channels). 
+        This allows the shader to read the interleaved U and V (color) data from the second plane of the NV12 texture.
+        */
         uvd.Format = DXGI_FORMAT_R8G8_UNORM;
-        device->CreateShaderResourceView(stagingTex, &uvd, &srvUV);
+
+        //This creates the SRV for the UV plane, allowing the pixel shader to access the color data of the video.
+        device->CreateShaderResourceView(videoTexture, &uvd, &srvUV);
         return true;
     }
 
-    void CopyFrameToStaging(ID3D11DeviceContext* ctx, AVFrame* frame) {
+    void CopyFrameToStaging(ID3D11DeviceContext* ctx, AVFrame* frame) 
+    {
         ID3D11Texture2D* src = (ID3D11Texture2D*)frame->data[0];
         UINT idx = (UINT)(intptr_t)frame->data[1];
         D3D11_TEXTURE2D_DESC d; src->GetDesc(&d);
-        ctx->CopySubresourceRegion(stagingTex, 0, 0, 0, 0, src, idx, nullptr);
-        ctx->CopySubresourceRegion(stagingTex, 1, 0, 0, 0, src, d.ArraySize + idx, nullptr);
+        ctx->CopySubresourceRegion(videoTexture, 0, 0, 0, 0, src, idx, nullptr);
+        ctx->CopySubresourceRegion(videoTexture, 1, 0, 0, 0, src, d.ArraySize + idx, nullptr);
     }
 };
 
@@ -412,7 +501,9 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProc(h, m, w, l);
 }
 
-int main() {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+//int main() 
+{
     WNDCLASS wc = { 0 }; wc.lpfnWndProc = WndProc; wc.lpszClassName = L"VP"; wc.hInstance = GetModuleHandle(NULL);
     RegisterClass(&wc);
     HWND hwnd = CreateWindow(L"VP", L"OOP Video Player", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 720, 0, 0, wc.hInstance, 0);
@@ -424,8 +515,8 @@ int main() {
 
     VideoSource bgVideo, fgVideo;
     // Update these paths to your local files
-    bgVideo.Open("Videos/toyota_positional_test_v3_max_speed_accel_bg.mp4", g_Renderer.device, g_Renderer.context);
-    fgVideo.Open("Videos/1.mp4", g_Renderer.device, g_Renderer.context);
+    bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
+    fgVideo.OpenFile("Videos/1.mp4", g_Renderer.device, g_Renderer.context);
 
     bool fgActive = false;
     double fgPts = 0;
