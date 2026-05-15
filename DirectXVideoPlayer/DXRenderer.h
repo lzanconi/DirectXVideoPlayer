@@ -36,6 +36,8 @@ public:
     void Resize(int width, int height);
     void BeginFrame();
     void EndFrame();
-	void DrawVideo(VideoSource& src, DXShader& shader, float alpha, bool blend, float winW, float winH);
+	void DrawVideo(VideoSource* src, DXShader* shader, float alpha, bool blend, float winW, float winH);
+    IDXGISwapChain* GetSwapChain();
+    ID3D11DeviceContext* GetContext();
 };
 

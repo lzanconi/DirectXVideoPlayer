@@ -100,10 +100,10 @@ void DXRenderer::EndFrame()
     swapChain->Present(1, 0);
 }
 
-void DXRenderer::DrawVideo(VideoSource& src, DXShader& shader, float alpha, bool blend, float winW, float winH)
+void DXRenderer::DrawVideo(VideoSource* src, DXShader* shader, float alpha, bool blend, float winW, float winH)
 {
     // Setup aspect ratio viewport
-    float ar = (float)src.width / (float)src.height;
+    float ar = (float)src->width / (float)src->height;
     float wAR = winW / winH;
     float vpW = (wAR > ar) ? winH * ar : winW;
     float vpH = (wAR > ar) ? winH : winW / ar;
@@ -116,12 +116,22 @@ void DXRenderer::DrawVideo(VideoSource& src, DXShader& shader, float alpha, bool
     ((float*)ms.pData)[0] = alpha;
     context->Unmap(alphaCB, 0);
 
-    context->IASetInputLayout(shader.layout);
-    context->VSSetShader(shader.vs, nullptr, 0);
-    context->PSSetShader(shader.ps, nullptr, 0);
+    context->IASetInputLayout(shader->layout);
+    context->VSSetShader(shader->vs, nullptr, 0);
+    context->PSSetShader(shader->ps, nullptr, 0);
     context->PSSetConstantBuffers(0, 1, &alphaCB);
-    context->PSSetShaderResources(0, 1, &src.srvY);
-    context->PSSetShaderResources(1, 1, &src.srvUV);
+    context->PSSetShaderResources(0, 1, &src->srvY);
+    context->PSSetShaderResources(1, 1, &src->srvUV);
     context->OMSetBlendState(blend ? blendState : nullptr, nullptr, 0xFFFFFFFF);
     context->Draw(6, 0);
+}
+
+IDXGISwapChain* DXRenderer::GetSwapChain()
+{
+	return swapChain;
+}
+
+ID3D11DeviceContext* DXRenderer::GetContext()
+{
+	return context;
 }
