@@ -145,14 +145,19 @@ class VideoSource
 public:
     AVFormatContext* fmtCtx = nullptr;
     AVCodecContext* decCtx = nullptr;
+    ID3D11Texture2D* videoTexture = nullptr;
+    ID3D11ShaderResourceView *srvY = nullptr; 
+    ID3D11ShaderResourceView *srvUV = nullptr;
     int streamIdx = -1;
     int width = 0; 
     int height = 0;
     double duration = 0.0;
+	double startTime = 0.0; 
+    double lastPTS = -1.0;
 	bool isInitialized = false;
-    ID3D11Texture2D* videoTexture = nullptr;
-    ID3D11ShaderResourceView* srvY = nullptr, * srvUV = nullptr;
-
+	bool looped = false;
+    
+    std::atomic<int64_t> bg_capture_time_ns;
 public:
     ~VideoSource() 
     {
@@ -261,29 +266,91 @@ public:
         if (!isInitialized) 
 			return true; // No frames to decode yet, but not an error
 
-        AVPacket* pkt = av_packet_alloc();
+		double currentTime = GetTimeStd();
+
+        if (startTime <= 0)
+            return true;
+
+		double playPos = currentTime - startTime;
+
+        AVPacket* raw_packet = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
         bool frameDecoded = false;
 
-        if (av_read_frame(fmtCtx, pkt) >= 0) {
-            if (pkt->stream_index == streamIdx && avcodec_send_packet(decCtx, pkt) == 0) {
-                if (avcodec_receive_frame(decCtx, frame) == 0) {
-                    pts = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
-                    CopyFrameToStaging(context, frame);
-                    frameDecoded = true;
+        if (playPos > lastPTS)
+        {
+            while (!frameDecoded)
+            {
+                if (av_read_frame(fmtCtx, raw_packet) >= 0)
+                {
+                    if (raw_packet->stream_index == streamIdx)
+                    {
+                        if (avcodec_send_packet(decCtx, raw_packet) == 0)
+                        {
+                            if (avcodec_receive_frame(decCtx, frame) == 0)
+                            {
+                                pts = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
+                                CopyFrameToDX11Texture(context, frame);
+                                lastPTS = playPos;
+                                frameDecoded = true;
+                                bg_capture_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                            }
+                        }
+                    }
+                    av_packet_unref(raw_packet);
+                }
+                else
+                {
+                    if (looped)
+                    {
+						Rewind();
+						Play(GetTimeStd()); 
+						frameDecoded = true; // Allow loop to start immediately 
+                    }
+                    else
+                    {
+                        return false;
+                    }
                 }
             }
-            av_packet_unref(pkt);
-        }
-        else {
-            // End of stream logic: Loop
-            avcodec_flush_buffers(decCtx);
-            av_seek_frame(fmtCtx, streamIdx, 0, AVSEEK_FLAG_BACKWARD);
         }
 
+        //if (av_read_frame(fmtCtx, raw_packet) >= 0) {
+        //    if (raw_packet->stream_index == streamIdx && avcodec_send_packet(decCtx, raw_packet) == 0) {
+        //        if (avcodec_receive_frame(decCtx, frame) == 0) {
+        //            pts = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
+        //            CopyFrameToDX11Texture(context, frame);
+        //            frameDecoded = true;
+        //        }
+        //    }
+        //    av_packet_unref(raw_packet);
+        //}
+        //else {
+        //    // End of stream logic: Loop
+        //    avcodec_flush_buffers(decCtx);
+        //    av_seek_frame(fmtCtx, streamIdx, 0, AVSEEK_FLAG_BACKWARD);
+        //}
+
         av_frame_free(&frame);
-        av_packet_free(&pkt);
+        av_packet_free(&raw_packet);
+
         return frameDecoded;
+    }
+
+    void Play(double startTime)
+    {
+		this->startTime = startTime;
+    }
+
+    void Rewind()
+    {
+        if (!isInitialized)
+            return;
+
+        avcodec_flush_buffers(decCtx);
+        av_seek_frame(fmtCtx, streamIdx, 0, AVSEEK_FLAG_BACKWARD);
+        lastPTS = -1.0;
     }
 
 private:
@@ -346,7 +413,11 @@ private:
         return true;
     }
 
-    void CopyFrameToStaging(ID3D11DeviceContext* ctx, AVFrame* frame) 
+    /*
+    Performs the critical task of transferring decoded video data from FFmpeg's internal hardware surfaces into the DirectX 11 texture 
+    that the application uses for rendering.
+    */
+    void CopyFrameToDX11Texture(ID3D11DeviceContext* ctx, AVFrame* frame) 
     {
         ID3D11Texture2D* src = (ID3D11Texture2D*)frame->data[0];
         UINT idx = (UINT)(intptr_t)frame->data[1];
@@ -453,7 +524,10 @@ public:
         context->Draw(6, 0);
     }
 
-    void EndFrame() { swapChain->Present(1, 0); }
+    void EndFrame() 
+    { 
+        swapChain->Present(1, 0); 
+    }
 };
 
 // --- Window & Main ---
@@ -517,6 +591,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Update these paths to your local files
     bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
     fgVideo.OpenFile("Videos/1.mp4", g_Renderer.device, g_Renderer.context);
+    
+	bgVideo.looped = true;
+	bgVideo.Play(GetTimeStd());
 
     bool fgActive = false;
     double fgPts = 0;
@@ -527,12 +604,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) { DispatchMessage(&msg); continue; }
 
-        if (g_Space) { g_Space = false; fgActive = true; }
+        if (g_Space) 
+        { 
+            g_Space = false; 
+            fgActive = true; 
+			fgVideo.Rewind();
+			fgVideo.Play(GetTimeStd());
+        }
 
         double bgPts;
         bgVideo.GetNextFrame(g_Renderer.context, bgPts);
-        if (fgActive) {
-            if (!fgVideo.GetNextFrame(g_Renderer.context, fgPts)) fgActive = false;
+
+        if (fgActive) 
+        {
+            if (!fgVideo.GetNextFrame(g_Renderer.context, fgPts)) 
+                fgActive = false;
         }
 
         RECT rc; GetClientRect(hwnd, &rc);
@@ -541,7 +627,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         g_Renderer.BeginFrame();
         g_Renderer.DrawVideo(bgVideo, videoShader, 1.0f, false, w, h);
-        if (fgActive) {
+        
+        if (fgActive) 
+        {
             float fade = (fgPts < 1.0) ? (float)fgPts : ((fgVideo.duration - fgPts < 1.0) ? (float)(fgVideo.duration - fgPts) : 1.0f);
             g_Renderer.DrawVideo(fgVideo, videoShader, max(0.0f, fade), true, w, h);
         }
