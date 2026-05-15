@@ -1,7 +1,7 @@
 #pragma once
-#include <windows.h>
 #include <string>
 #include <vector>
+#include <chrono>
 
 // Utility function to convert std::string (UTF-8) to std::wstring (UTF-16)
 inline std::wstring stringToWS(const std::string& s) 

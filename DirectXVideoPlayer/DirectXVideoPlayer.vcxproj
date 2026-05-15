@@ -129,11 +129,19 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="DXRenderer.cpp" />
+    <ClCompile Include="DXShader.cpp" />
+    <ClCompile Include="IRenderer.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="VideoSource.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="customtypes.h" />
+    <ClInclude Include="DXRenderer.h" />
+    <ClInclude Include="DXShader.h" />
+    <ClInclude Include="IRenderer.h" />
     <ClInclude Include="utils.h" />
+    <ClInclude Include="VideoSource.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
