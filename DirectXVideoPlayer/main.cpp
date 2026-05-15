@@ -595,7 +595,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     VideoSource bgVideo, fgVideo;
     // Update these paths to your local files
-    bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
+    //bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
+    bgVideo.OpenFile("Videos/toyota_positional_test_v3_max_speed_accel_bg.mp4", g_Renderer.device, g_Renderer.context);
     fgVideo.OpenFile("Videos/1.mp4", g_Renderer.device, g_Renderer.context);
     
 	bgVideo.looped = true;
