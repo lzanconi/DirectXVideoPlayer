@@ -4,6 +4,7 @@
 #include "DXShader.h"
 #include "VideoSource.h"
 #include "utils.h"
+#include "NetworkManager.h"
 
 
 // Initialize the static AppState member
@@ -38,6 +39,9 @@ App::App(int width, int height)
 
 	ShowWindow(window, SW_SHOW);
 	ToggleFullscreen(window);
+
+    state.networkMgr = new NetworkManager("127.0.0.1", 5555, this);
+	state.networkMgr->Start();
 }
 
 App::~App()

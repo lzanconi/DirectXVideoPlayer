@@ -6,6 +6,7 @@
 class IRenderer;
 class VideoSource;
 class DXShader;
+class NetworkManager;
 struct AVBufferRef;
 struct AVPacket;
 struct AVFrame;

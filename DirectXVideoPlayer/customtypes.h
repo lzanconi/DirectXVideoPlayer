@@ -4,6 +4,7 @@
 
 class VideoSource;
 class IRenderer;
+class NetworkManager;
 
 struct AppState
 {
@@ -13,7 +14,7 @@ struct AppState
     bool interruptRead = false;
     std::vector<VideoSource*> sources;
     IRenderer* renderer = nullptr;
-    //NetworkManager* networkMgr = nullptr;
+    NetworkManager* networkMgr = nullptr;
     double lastBackgroundPTS = -1.0;
     bool isRotated = false;
 
