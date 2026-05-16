@@ -5,6 +5,8 @@
 #include "VideoSource.h"
 #include "utils.h"
 #include "NetworkManager.h"
+#include "ContentManager.h"
+#include <iostream>
 
 
 // Initialize the static AppState member
@@ -12,6 +14,16 @@ AppState App::state;
 
 App::App(int width, int height)
 {
+    ContentManager contentMgr;
+    contentMgr.LoadVideoContentFromFolder(".\\Videos");
+    if (contentMgr.GetVideoContents().empty())
+    {
+        /*std::cerr << "No .mp4 files found." << std::endl;*/
+		MessageBoxA(nullptr, "No .mp4 files found in the Videos folder.", "Error", MB_ICONERROR);
+    }
+
+
+
     wndClass.lpfnWndProc = WndProc; 
     wndClass.lpszClassName = L"VP"; 
     wndClass.hInstance = GetModuleHandle(NULL);
@@ -26,15 +38,33 @@ App::App(int width, int height)
     videoShader = new DXShader();
     videoShader->LoadFromFile(renderer->GetDevice(), L"shaders.hlsl");
 
-    bgVideo = new VideoSource();
-	fgVideo = new VideoSource();
+    for (const auto& videoContent : contentMgr.GetVideoContents())
+    {
+        VideoSource* videoSource = new VideoSource();
+        if (videoSource->OpenFile(videoContent.filename, renderer->GetDevice(), renderer->GetContext()))
+        {
+            videoSource->fadeInDuration = videoContent.fadeInDuration;
+            videoSource->fadeOutDuration = videoContent.fadeOutDuration;
+            videoSource->looped = videoContent.looped;
+            videoSource->positions = videoContent.positions;
+            state.sources.push_back(videoSource);
+        }
+        else
+        {
+            std::cerr << "Failed to open video: " << videoContent.filename << std::endl;
+            delete videoSource;
+        }
+    }
 
-    //bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
-    bgVideo->OpenFile("Videos/toyota_positional_test_v3_max_speed_accel_bg.mp4", renderer->GetDevice(), renderer->GetContext());
-    fgVideo->OpenFile("Videos/1.mp4", renderer->GetDevice(), renderer->GetContext());
+ //   bgVideo = new VideoSource();
+	//fgVideo = new VideoSource();
+
+ //   //bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
+ //   bgVideo->OpenFile("Videos/toyota_positional_test_v3_max_speed_accel_bg.mp4", renderer->GetDevice(), renderer->GetContext());
+ //   fgVideo->OpenFile("Videos/1.mp4", renderer->GetDevice(), renderer->GetContext());
     
-    bgVideo->looped = true;
-    bgVideo->Play(GetTimeStd());
+    state.sources[0]->looped = true;
+    state.sources[0]->Play(GetTimeStd());
     //fgVideo->looped = true;
 
 	ShowWindow(window, SW_SHOW);
@@ -46,17 +76,14 @@ App::App(int width, int height)
 
 App::~App()
 {
+    for (auto source : state.sources)
+        delete source;
+
     if (renderer)
         delete renderer;
 
     if (videoShader)
 		delete videoShader;
-
-    if (bgVideo)
-        delete bgVideo;
-
-    if (fgVideo)
-        delete fgVideo;
 }
 
 void App::Run()
@@ -73,15 +100,14 @@ void App::Run()
         {
 			spaceBarPressed = false;
             fgActive = true;
-			fgVideo->Rewind();
-			fgVideo->Play(GetTimeStd());
+			state.sources[1]->Rewind();
+			state.sources[1]->Play(GetTimeStd());
         }
 
-		bgVideo->GetNextFrame(renderer->GetContext());
-
+		state.sources[0]->GetNextFrame(renderer->GetContext());
         if (fgActive)
         {
-            if (!fgVideo->GetNextFrame(renderer->GetContext()))
+            if (!state.sources[1]->GetNextFrame(renderer->GetContext()))
                 fgActive = false;
 		}
 
@@ -91,17 +117,17 @@ void App::Run()
         float h = (float)(rc.bottom - rc.top);
 
 		renderer->BeginFrame();
-		renderer->DrawVideo(bgVideo, videoShader, 1.0f, false, w, h);
+		renderer->DrawVideo(state.sources[0], videoShader, 1.0f, false, w, h);
 
         if (fgActive)
         {
             float fade = 1.0f;
-            if (fgVideo->internalPTS < fgVideo->fadeInDuration)
-                fade = (float)fgVideo->internalPTS / fgVideo->fadeInDuration;
-            else if (fgVideo->duration - fgVideo->internalPTS < fgVideo->fadeOutDuration)
-                fade = (float)(fgVideo->duration - fgVideo->internalPTS) / fgVideo->fadeOutDuration;
+            if (state.sources[1]->internalPTS < state.sources[1]->fadeInDuration)
+                fade = (float)state.sources[1]->internalPTS / state.sources[1]->fadeInDuration;
+            else if (state.sources[1]->duration - state.sources[1]->internalPTS < state.sources[1]->fadeOutDuration)
+                fade = (float)(state.sources[1]->duration - state.sources[1]->internalPTS) / state.sources[1]->fadeOutDuration;
 
-            renderer->DrawVideo(fgVideo, videoShader, max(0.0f, fade), true, w, h);
+            renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, fade), true, w, h);
         }
 
         renderer->EndFrame();
@@ -110,22 +136,22 @@ void App::Run()
 
 VideoSource* App::GetBackgroundVideo()
 {
-	return nullptr;
+    return state.sources.empty() ? nullptr : state.sources[0];
 }
 
 std::vector<float> App::GetPositions()
 {
-	return std::vector<float>();
+    return state.sources[0]->positions;
 }
 
 double App::GetLastPTS()
 {
-	return 0.0;
+	return state.sources[0]->lastPTS;
 }
 
 int64_t App::GetBGCaptureTimeNS()
 {
-	return 0;
+	return state.sources[0]->bg_capture_time_ns;
 }
 
 LRESULT App::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -153,6 +179,12 @@ LRESULT App::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == WM_DESTROY) 
         PostQuitMessage(0);
+
+    if (msg == WM_KEYDOWN && wp == VK_ESCAPE)
+    {
+        DestroyWindow(hwnd);
+        return 0;
+    }
     
     if (msg == WM_KEYDOWN && wp == VK_SPACE) 
         spaceBarPressed = true;

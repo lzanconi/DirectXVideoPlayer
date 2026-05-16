@@ -5,6 +5,7 @@
 
 class IRenderer;
 class VideoSource;
+class ContentManager;
 class DXShader;
 class NetworkManager;
 struct AVBufferRef;
@@ -22,8 +23,6 @@ private:
 	bool fgActive = false;
 	IRenderer* renderer = nullptr;
 	DXShader* videoShader = nullptr;
-	VideoSource* bgVideo = nullptr; 
-	VideoSource* fgVideo = nullptr;
 	AVBufferRef* hw_ctx;
 	AVPacket* raw_packet;
 	AVFrame* frame;

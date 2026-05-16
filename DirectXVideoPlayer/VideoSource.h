@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <string>
+#include <vector>
 
 // Forward declarations for FFmpeg structs to keep the header clean
 struct AVFormatContext;
@@ -33,6 +34,7 @@ public:
     float fadeInDuration = 2.0f;
     float fadeOutDuration = 2.0f;
     std::atomic<int64_t> bg_capture_time_ns;
+    std::vector<float> positions;
 
 public:
 	VideoSource() = default;
