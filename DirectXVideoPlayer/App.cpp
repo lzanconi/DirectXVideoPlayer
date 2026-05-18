@@ -135,17 +135,8 @@ void App::Run()
 
         if (state.sources.size() > 1 && state.sources[1]->isActive)
         {
-            float fade = 1.0f;
-            if (state.sources[1]->internalPTS < state.sources[1]->fadeInDuration)
-            {
-                fade = (float)state.sources[1]->internalPTS / state.sources[1]->fadeInDuration;
-            }
-            else if (state.sources[1]->duration - state.sources[1]->internalPTS < state.sources[1]->fadeOutDuration)
-            {
-                fade = (float)(state.sources[1]->duration - state.sources[1]->internalPTS) / state.sources[1]->fadeOutDuration;
-            }
-
-            renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, fade), true, w, h);
+			float alpha = state.sources[1]->ComputeAlpha();
+            renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, alpha), true, w, h);
         }
 
         renderer->EndRendering();
