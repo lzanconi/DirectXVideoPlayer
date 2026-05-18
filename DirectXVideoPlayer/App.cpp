@@ -107,6 +107,9 @@ void App::Run()
             {
 				state.isSequenceActive = false; // Interrupt any active sequence when spacebar is pressed
 				state.sources[targetFgIndex]->isSequenceLoop = false;
+				state.sources[targetFgIndex]->looped = contentMgr->GetVideoContents().at(targetFgIndex).looped;
+				state.sources[targetFgIndex]->fadeInDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeInDuration;
+				state.sources[targetFgIndex]->fadeOutDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeOutDuration;
                 RequestForegroundVideo(targetFgIndex);
             }
         }
