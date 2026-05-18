@@ -64,7 +64,7 @@ App::App(int width, int height)
     ToggleFullscreen(window);
 
     state.networkMgr = new NetworkManager("127.0.0.1", 5555, this);
-    state.networkMgr->Start();
+    //state.networkMgr->Start();
 }
 
 App::~App()
@@ -149,10 +149,22 @@ void App::RequestForegroundVideo(int index)
         state.fgState = ForegroundState::FadingIn;
         state.isForcedFadingOut = false;
         state.sources[index]->isActive = true;
-        state.sources[index]->alpha = 0.0f;
         state.sources[index]->fadeInComplete = false;
+        state.sources[index]->alpha = 0.0f;
+        
         state.sources[index]->Rewind();
         state.sources[index]->Play(GetTimeStd());
+        
+        // Decode first frame immediately to avoid green flash on instant cuts
+        state.sources[index]->GetNextFrame(renderer->GetContext());
+        
+        // If fadeInDuration is 0, start at full opacity for instant cut
+        if (state.sources[index]->fadeInDuration <= 0.0f)
+        {
+            state.sources[index]->alpha = 1.0f;
+            state.sources[index]->fadeInComplete = true;
+            state.fgState = ForegroundState::Playing;
+        }
     }
     // Case 2: Already active or fading in. Force a localized transition to fade out.
     else if ((state.fgState == ForegroundState::Playing || state.fgState == ForegroundState::FadingIn) && !state.isForcedFadingOut)
@@ -199,6 +211,7 @@ void App::AdvanceSequence()
         state.sources[matchIdx]->looped = seqItem.looped;
         state.sources[matchIdx]->isSequenceLoop = seqItem.looped;
 
+		std::cout << "Advancing to sequence item: " << seqItem.filename << std::endl;
         // Force launch video through standard player pipeline
         RequestForegroundVideo(matchIdx);
     }
@@ -278,7 +291,41 @@ void App::ComputeVideoFrames()
         }
         case ForegroundState::Playing:
         {
-            // Only enter fade out if it's not a sequence loop
+            // Check for instant cut: video ended with zero fade-out duration
+            if (!frameDecoded && !fgVideo->isSequenceLoop && fgVideo->fadeOutDuration <= 0.0f)
+            {
+                // Video ended, immediately transition to next in sequence
+                if (state.isSequenceActive && state.pendingForegroundIdx == -1)
+                {
+                    int oldIdx = state.currentForegroundIdx;
+                    state.currentSequenceIdx++;
+                    AdvanceSequence();
+                    
+                    // Clean up old video after new one starts
+                    if (state.currentForegroundIdx != oldIdx && oldIdx != -1)
+                    {
+                        state.sources[oldIdx]->isActive = false;
+                        state.sources[oldIdx]->alpha = 0.0f;
+                    }
+                    else if (state.currentForegroundIdx == -1)
+                    {
+                        fgVideo->isActive = false;
+                        fgVideo->alpha = 0.0f;
+                        state.fgState = ForegroundState::Idle;
+                    }
+                }
+                else
+                {
+                    // Not in sequence, normal cleanup
+                    fgVideo->isActive = false;
+                    fgVideo->alpha = 0.0f;
+                    state.currentForegroundIdx = -1;
+                    state.fgState = ForegroundState::Idle;
+                }
+                break;
+            }
+            
+            // Only enter fade out if it's not a sequence loop and we're in fade-out window
             if (!fgVideo->isSequenceLoop && (fgVideo->duration - fgVideo->internalPTS <= fgVideo->fadeOutDuration))
             {
                 state.fgState = ForegroundState::FadingOut;
@@ -290,34 +337,76 @@ void App::ComputeVideoFrames()
             // CRITICAL FIX: If alpha hits zero OR the asset runs out of frames early, cleanly terminate!
             if (fgVideo->alpha <= 0.001f || !frameDecoded)
             {
-                fgVideo->isActive = false;
-                fgVideo->alpha = 0.0f;
-
-                state.currentForegroundIdx = -1;
-                state.fgState = ForegroundState::Idle;
-                state.isForcedFadingOut = false;
-
                 // --- SEQUENCING PIPELINE HOOK ---
                 if (state.isSequenceActive && state.pendingForegroundIdx == -1)
                 {
                     if (!fgVideo->isSequenceLoop)
                     {
+                        // Store the old video index before advancing
+                        int oldIdx = state.currentForegroundIdx;
+                        
                         state.currentSequenceIdx++;
                         AdvanceSequence();
+                        
+                        // Deactivate old video after new one is started
+                        if (state.currentForegroundIdx != oldIdx && oldIdx != -1)
+                        {
+                            state.sources[oldIdx]->isActive = false;
+                            state.sources[oldIdx]->alpha = 0.0f;
+                        }
+                        else if (state.currentForegroundIdx == -1)
+                        {
+                            // Sequence ended, clean up normally
+                            fgVideo->isActive = false;
+                            fgVideo->alpha = 0.0f;
+                            state.fgState = ForegroundState::Idle;
+                            state.isForcedFadingOut = false;
+                        }
                     }
                 }
                 else if (state.pendingForegroundIdx != -1)
                 {
+                    int oldIdx = state.currentForegroundIdx;
                     int nextIdx = state.pendingForegroundIdx;
                     state.pendingForegroundIdx = -1;
 
                     state.currentForegroundIdx = nextIdx;
                     state.fgState = ForegroundState::FadingIn;
                     state.sources[nextIdx]->isActive = true;
-                    state.sources[nextIdx]->alpha = 0.0f;
                     state.sources[nextIdx]->fadeInComplete = false;
+                    state.sources[nextIdx]->alpha = 0.0f;
+                    
                     state.sources[nextIdx]->Rewind();
                     state.sources[nextIdx]->Play(GetTimeStd());
+                    
+                    // Decode first frame immediately to avoid green flash on instant cuts
+                    state.sources[nextIdx]->GetNextFrame(renderer->GetContext());
+                    
+                    // If fadeInDuration is 0, start at full opacity for instant cut
+                    if (state.sources[nextIdx]->fadeInDuration <= 0.0f)
+                    {
+                        state.sources[nextIdx]->alpha = 1.0f;
+                        state.sources[nextIdx]->fadeInComplete = true;
+                        state.fgState = ForegroundState::Playing;
+                    }
+                    
+                    // Clean up old video
+                    if (oldIdx != -1 && oldIdx != nextIdx)
+                    {
+                        state.sources[oldIdx]->isActive = false;
+                        state.sources[oldIdx]->alpha = 0.0f;
+                    }
+                    
+                    state.isForcedFadingOut = false;
+                }
+                else
+                {
+                    // No sequence or pending video, clean up normally
+                    fgVideo->isActive = false;
+                    fgVideo->alpha = 0.0f;
+                    state.currentForegroundIdx = -1;
+                    state.fgState = ForegroundState::Idle;
+                    state.isForcedFadingOut = false;
                 }
             }
             break;
@@ -350,15 +439,16 @@ void App::DrawVideos(float width, float height)
     // Draw background
     renderer->DrawVideo(state.sources[0], videoShader, 1.0f, false, width, height);
 
-    if (state.currentForegroundIdx != -1)
+    // Render all active foreground videos (supports overlap during transitions)
+    for (size_t i = 0; i < state.sources.size(); ++i)
     {
-        int idx = state.currentForegroundIdx;
-        VideoSource* fgVideo = state.sources[idx];
-
-        if (fgVideo->isActive)
+        if (state.sources[i]->isActive && i != 0) // Skip background (index 0)
         {
-            float currentAlpha = fgVideo->alpha;
-            renderer->DrawVideo(fgVideo, videoShader, (std::max)(0.0f, currentAlpha), true, width, height);
+            float currentAlpha = state.sources[i]->alpha;
+            if (currentAlpha > 0.0f)
+            {
+                renderer->DrawVideo(state.sources[i], videoShader, currentAlpha, true, width, height);
+            }
         }
     }
 }
