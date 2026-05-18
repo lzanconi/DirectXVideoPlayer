@@ -172,21 +172,30 @@ void App::ComputeVideoFrames()
     // Compute frame for the background video
     state.sources[0]->GetNextFrame(renderer->GetContext());
 
+    //Checks if a foreground video is currently active. 
+    //If state.currentForegroundIdx is -1, it means no foreground video is selected and skips the rest of the logic
     if (state.currentForegroundIdx != -1)
     {
+        //Grab a pointer to the current foreground video
         int idx = state.currentForegroundIdx;
         VideoSource* fgVideo = state.sources[idx];
 
+		//Attempt to decode the next frame for the active foreground video. 
+		//It returns true if a new frame was successfully decoded, or false if the video has reached its natural end
         bool frameDecoded = fgVideo->GetNextFrame(renderer->GetContext());
 
-        // 1. Calculate native alpha baseline
+		//Compute the alpha value for the current frame based on its own internal timing and fade parameters
         float currentAlpha = fgVideo->ComputeAlpha();
 
-        // 2. Overwrite alpha value locally if an external early interruption was triggered
+		//FORCED FADE OUT LOGIC:
+        //Checks if this fade-out phase was forced early by a user pressing the spacebar mid-playback
         if (state.isForcedFadingOut && state.fgState == ForegroundState::FadingOut)
         {
+            //Calculates how many seconds have passed since the user interrupted the video. 
+            //It subtracts the playhead time when the button was pressed from the current playhead time.
             double elapsedFadeTime = fgVideo->internalPTS - state.forcedFadeOutStartTime;
 
+            //Check if the video has to fade out 
             if (fgVideo->fadeOutDuration > 0.0f)
             {
                 // Linearly interpolate downward to absolute transparency over the fade out window length
@@ -199,7 +208,7 @@ void App::ComputeVideoFrames()
             }
         }
 
-        // Apply our final resolved calculation onto the video resource object field
+        //Updates the actual variable used by the DirectX renderer to fade out the video texture
         fgVideo->alpha = currentAlpha;
 
         // 3. State Engine evaluation block
