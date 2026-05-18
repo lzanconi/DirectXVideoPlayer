@@ -21,9 +21,16 @@
 #pragma comment(lib, "avutil.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
+//WINDOW APP
+//Make it a Windows application without a console window, and specify the entry point as mainCRTStartup to avoid linker errors about missing WinMain.
+//#pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-//int main() 
+//CONSOLE APP
+//Make it a console application to allow for console output, and specify the entry point as mainCRTStartup to avoid linker errors about missing WinMain.
+#pragma comment(linker, "/SUBSYSTEM:console /ENTRY:mainCRTStartup")
+
+//int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int main() 
 {
     try
     {
