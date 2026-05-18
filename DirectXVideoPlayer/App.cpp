@@ -298,20 +298,28 @@ void App::ComputeVideoFrames()
                 if (state.isSequenceActive && state.pendingForegroundIdx == -1)
                 {
                     int oldIdx = state.currentForegroundIdx;
+                    
+                    // Reset state BEFORE calling AdvanceSequence so RequestForegroundVideo goes to Case 1
+                    state.currentForegroundIdx = -1;
+                    state.fgState = ForegroundState::Idle;
+                    
                     state.currentSequenceIdx++;
                     AdvanceSequence();
                     
                     // Clean up old video after new one starts
-                    if (state.currentForegroundIdx != oldIdx && oldIdx != -1)
+                    if (state.currentForegroundIdx != -1 && oldIdx != -1)
                     {
                         state.sources[oldIdx]->isActive = false;
                         state.sources[oldIdx]->alpha = 0.0f;
                     }
                     else if (state.currentForegroundIdx == -1)
                     {
-                        fgVideo->isActive = false;
-                        fgVideo->alpha = 0.0f;
-                        state.fgState = ForegroundState::Idle;
+                        // Sequence ended, clean up the old video
+                        if (oldIdx != -1)
+                        {
+                            state.sources[oldIdx]->isActive = false;
+                            state.sources[oldIdx]->alpha = 0.0f;
+                        }
                     }
                 }
                 else
@@ -345,22 +353,28 @@ void App::ComputeVideoFrames()
                         // Store the old video index before advancing
                         int oldIdx = state.currentForegroundIdx;
                         
+                        // Reset state BEFORE calling AdvanceSequence so RequestForegroundVideo goes to Case 1
+                        state.currentForegroundIdx = -1;
+                        state.fgState = ForegroundState::Idle;
+                        state.isForcedFadingOut = false;
+                        
                         state.currentSequenceIdx++;
                         AdvanceSequence();
                         
                         // Deactivate old video after new one is started
-                        if (state.currentForegroundIdx != oldIdx && oldIdx != -1)
+                        if (state.currentForegroundIdx != -1 && oldIdx != -1)
                         {
                             state.sources[oldIdx]->isActive = false;
                             state.sources[oldIdx]->alpha = 0.0f;
                         }
                         else if (state.currentForegroundIdx == -1)
                         {
-                            // Sequence ended, clean up normally
-                            fgVideo->isActive = false;
-                            fgVideo->alpha = 0.0f;
-                            state.fgState = ForegroundState::Idle;
-                            state.isForcedFadingOut = false;
+                            // Sequence ended, clean up the old video
+                            if (oldIdx != -1)
+                            {
+                                state.sources[oldIdx]->isActive = false;
+                                state.sources[oldIdx]->alpha = 0.0f;
+                            }
                         }
                     }
                 }
