@@ -32,7 +32,7 @@ VideoSource::~VideoSource()
 
 bool VideoSource::OpenFile(const std::string& path, ID3D11Device* device, ID3D11DeviceContext* context)
 {
-	file_name = GetFilenameFromPath(path);
+    file_name = GetFilenameFromPath(path);
     //Opens the video file and reads the header to understand the container format
     if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0)
     {
@@ -114,7 +114,7 @@ bool VideoSource::OpenFile(const std::string& path, ID3D11Device* device, ID3D11
 }
 
 /*
-Manages the decoding loop, converting raw packets from the video stream into displayable DirectX textures while handling timing and looping.
+Responsible for managing the decoding loop, converting raw packets from the video stream into displayable DirectX textures while handling timing and looping.
 */
 bool VideoSource::GetNextFrame(ID3D11DeviceContext* context)
 {
@@ -165,27 +165,13 @@ bool VideoSource::GetNextFrame(ID3D11DeviceContext* context)
                 }
                 else
                 {
+                    av_frame_free(&frame);
+                    av_packet_free(&raw_packet);
                     return false;
                 }
             }
         }
     }
-
-    //if (av_read_frame(fmtCtx, raw_packet) >= 0) {
-    //    if (raw_packet->stream_index == streamIdx && avcodec_send_packet(decCtx, raw_packet) == 0) {
-    //        if (avcodec_receive_frame(decCtx, frame) == 0) {
-    //            pts = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
-    //            CopyFrameToDX11Texture(context, frame);
-    //            frameDecoded = true;
-    //        }
-    //    }
-    //    av_packet_unref(raw_packet);
-    //}
-    //else {
-    //    // End of stream logic: Loop
-    //    avcodec_flush_buffers(decCtx);
-    //    av_seek_frame(fmtCtx, streamIdx, 0, AVSEEK_FLAG_BACKWARD);
-    //}
 
     av_frame_free(&frame);
     av_packet_free(&raw_packet);
@@ -196,7 +182,7 @@ bool VideoSource::GetNextFrame(ID3D11DeviceContext* context)
 void VideoSource::Play(double startTime)
 {
     this->startTime = startTime;
-	internalPTS = 0.0;
+    internalPTS = 0.0;
     lastPTS = -1.0; // Reset lastPTS to allow immediate frame decoding
 }
 
@@ -211,9 +197,9 @@ void VideoSource::Rewind()
     internalPTS = 0.0;
 }
 
-float VideoSource::ComputeAlpha() 
+float VideoSource::ComputeAlpha()
 {
-	alpha = 1.0f;
+    alpha = 1.0f;
     if (internalPTS < fadeInDuration)
     {
         alpha = (float)internalPTS / fadeInDuration;
@@ -231,12 +217,6 @@ the video frames decoded by FFmpeg.
 */
 bool VideoSource::CreateResources(ID3D11Device* device)
 {
-    /*
-        This initializes a descriptor for a 2D texture:
-            -The width and height are set to match the video's dimensions.
-            -DXGI_FORMAT_NV12 is chosen as the format, which is a common YUV format used in video processing.
-            -D3D11_BIND_SHADER_RESOURCE flag indicates that this texture will be used as a shader resource, allowing it to be sampled in the pixel shader.
-        */
     D3D11_TEXTURE2D_DESC td =
     {
         (UINT)width,
@@ -247,47 +227,26 @@ bool VideoSource::CreateResources(ID3D11Device* device)
         D3D11_BIND_SHADER_RESOURCE
     };
 
-    /*
-    This calls the DirectX 11 device to actually allocate the memory for the texture on the GPU based on the descriptor above,
-    storing it in videoTexture.
-    */
     device->CreateTexture2D(&td, nullptr, &videoTexture);
 
-    /*
-    This creates a descriptor for a Shader Resource View(SRV) for the Luminance(Y) channel:
-        -The format is set to DXGI_FORMAT_R8_UNORM, which means each pixel will be represented by an 8-bit unsigned normalized integer (0-255)
-         for the Y brightness channel.
-    */
     D3D11_SHADER_RESOURCE_VIEW_DESC yd =
     {
         DXGI_FORMAT_R8_UNORM,
         D3D11_SRV_DIMENSION_TEXTURE2D
     };
 
-    //This specifies that the video texture has only one mipmap level (the full resolution).
     yd.Texture2D.MipLevels = 1;
 
-    //This creates the SRV for the Y plane, allowing the pixel shader to access the brightness data of the video.
     device->CreateShaderResourceView(videoTexture, &yd, &srvY);
 
-    //This copies the previous SRV descriptor to use as a starting point for the UV plane.
     D3D11_SHADER_RESOURCE_VIEW_DESC uvd = yd;
 
-    /*
-    This changes the format to DXGI_FORMAT_R8G8_UNORM (two 8-bit channels).
-    This allows the shader to read the interleaved U and V (color) data from the second plane of the NV12 texture.
-    */
     uvd.Format = DXGI_FORMAT_R8G8_UNORM;
 
-    //This creates the SRV for the UV plane, allowing the pixel shader to access the color data of the video.
     device->CreateShaderResourceView(videoTexture, &uvd, &srvUV);
     return true;
 }
 
-/*
-Performs the critical task of transferring decoded video data from FFmpeg's internal hardware surfaces into the DirectX 11 texture
-that the application uses for rendering.
-*/
 void VideoSource::CopyFrameToDX11Texture(ID3D11DeviceContext* ctx, AVFrame* frame)
 {
     ID3D11Texture2D* src = (ID3D11Texture2D*)frame->data[0];

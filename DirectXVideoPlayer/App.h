@@ -28,7 +28,6 @@ private:
 	WNDCLASS wndClass = { 0 };
 	MSG msg = { 0 };
 	HWND window = nullptr;
-	// Stores window position before going fullscreen
 	RECT windowRect = { 0 };
 	WINDOWPLACEMENT windowPlacement = { sizeof(WINDOWPLACEMENT) };
 
@@ -46,8 +45,9 @@ public:
 	void DrawVideos(float width, float height);
 
 private:
+	void RequestForegroundVideo(int index);
+
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 	LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 	void ToggleFullscreen(HWND hwnd);
 };
-

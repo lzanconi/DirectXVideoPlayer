@@ -7,9 +7,8 @@
 #include "NetworkManager.h"
 #include "ContentManager.h"
 #include <iostream>
+#include <algorithm>
 
-
-// Initialize the static AppState member
 AppState App::state;
 
 App::App(int width, int height)
@@ -18,14 +17,11 @@ App::App(int width, int height)
     contentMgr.LoadVideoContentFromFolder(".\\Videos");
     if (contentMgr.GetVideoContents().empty())
     {
-        /*std::cerr << "No .mp4 files found." << std::endl;*/
-		MessageBoxA(nullptr, "No .mp4 files found in the Videos folder.", "Error", MB_ICONERROR);
+        MessageBoxA(nullptr, "No .mp4 files found in the Videos folder.", "Error", MB_ICONERROR);
     }
 
-
-
-    wndClass.lpfnWndProc = WndProc; 
-    wndClass.lpszClassName = L"VP"; 
+    wndClass.lpfnWndProc = WndProc;
+    wndClass.lpszClassName = L"VP";
     wndClass.hInstance = GetModuleHandle(NULL);
     RegisterClass(&wndClass);
     window = CreateWindow(L"VP", L"OOP Video Player", WS_OVERLAPPEDWINDOW, 100, 100, width, height, 0, 0, wndClass.hInstance, this);
@@ -56,27 +52,19 @@ App::App(int width, int height)
         }
     }
 
-    for (const auto & source : state.sources)
+    for (const auto& source : state.sources)
     {
         std::cout << "VideoSource: " << source->file_name << " Duration: " << GetDurationMinSec(static_cast<int>(source->duration)) << std::endl;
-	}
+    }
 
- //   bgVideo = new VideoSource();
-	//fgVideo = new VideoSource();
-
- //   //bgVideo.OpenFile("Videos/13.mp4", g_Renderer.device, g_Renderer.context);
- //   bgVideo->OpenFile("Videos/toyota_positional_test_v3_max_speed_accel_bg.mp4", renderer->GetDevice(), renderer->GetContext());
- //   fgVideo->OpenFile("Videos/1.mp4", renderer->GetDevice(), renderer->GetContext());
-    
     state.sources[0]->looped = true;
     state.sources[0]->Play(GetTimeStd());
-    //fgVideo->looped = true;
 
-	ShowWindow(window, SW_SHOW);
-	ToggleFullscreen(window);
+    ShowWindow(window, SW_SHOW);
+    ToggleFullscreen(window);
 
     state.networkMgr = new NetworkManager("127.0.0.1", 5555, this);
-	state.networkMgr->Start();
+    state.networkMgr->Start();
 }
 
 App::~App()
@@ -94,7 +82,7 @@ App::~App()
         delete renderer;
 
     if (videoShader)
-		delete videoShader;
+        delete videoShader;
 }
 
 void App::Run()
@@ -109,28 +97,54 @@ void App::Run()
 
         if (spaceBarPressed)
         {
-			spaceBarPressed = false;
-            state.sources[1]->isActive = true;
-			state.sources[1]->Rewind();
-			state.sources[1]->Play(GetTimeStd());
+            spaceBarPressed = false;
+
+            int targetFgIndex = 1;
+
+            if (state.sources.size() > targetFgIndex)
+            {
+                RequestForegroundVideo(targetFgIndex);
+            }
         }
 
-		//Compute the frames of each active video (background and foreground) before rendering
         ComputeVideoFrames();
-        
-        RECT rc; 
+
+        RECT rc;
         GetClientRect(window, &rc);
         float w = (float)(rc.right - rc.left);
         float h = (float)(rc.bottom - rc.top);
 
-        //Begin DirectX rendering.
-		renderer->BeginRendering();
-
-		//Draw the videos (background and foreground if active) for the current frame
-		DrawVideos(w, h);
-
+        renderer->BeginRendering();
+        DrawVideos(w, h);
         renderer->EndRendering();
-	}
+    }
+}
+
+void App::RequestForegroundVideo(int index)
+{
+    // Case 1: Video engine is completely idling. Fade in normally.
+    if (state.fgState == ForegroundState::Idle)
+    {
+        state.currentForegroundIdx = index;
+        state.fgState = ForegroundState::FadingIn;
+        state.isForcedFadingOut = false;
+        state.sources[index]->isActive = true;
+        state.sources[index]->Rewind();
+        state.sources[index]->Play(GetTimeStd());
+    }
+    // Case 2: Already active or fading in. Force a localized transition to fade out.
+    else if ((state.fgState == ForegroundState::Playing || state.fgState == ForegroundState::FadingIn) && !state.isForcedFadingOut)
+    {
+        state.pendingForegroundIdx = index;
+        state.fgState = ForegroundState::FadingOut;
+
+        VideoSource* activeVideo = state.sources[state.currentForegroundIdx];
+
+        // Instead of mutating activeVideo->duration directly which breaks later triggers,
+        // we capture the specific timestamp frame where the fade-out interruption was requested.
+        state.isForcedFadingOut = true;
+        state.forcedFadeOutStartTime = activeVideo->internalPTS;
+    }
 }
 
 VideoSource* App::GetBackgroundVideo()
@@ -145,42 +159,124 @@ std::vector<float> App::GetPositions()
 
 double App::GetLastPTS()
 {
-	return state.sources[0]->lastPTS;
+    return state.sources[0]->lastPTS;
 }
 
 int64_t App::GetBGCaptureTimeNS()
 {
-	return state.sources[0]->bg_capture_time_ns;
+    return state.sources[0]->bg_capture_time_ns;
 }
 
 void App::ComputeVideoFrames()
 {
-    //Compute frame for the background video.
+    // Compute frame for the background video
     state.sources[0]->GetNextFrame(renderer->GetContext());
 
-    //Compute frame for the foreground video if it's active and it has not reached its end.
-    if (state.sources.size() > 1 && state.sources[1]->isActive)
+    if (state.currentForegroundIdx != -1)
     {
-        //If GetNextFrame() returns false, it means the foreground video has reached its end
-        if (!state.sources[1]->GetNextFrame(renderer->GetContext()))
+        int idx = state.currentForegroundIdx;
+        VideoSource* fgVideo = state.sources[idx];
+
+        bool frameDecoded = fgVideo->GetNextFrame(renderer->GetContext());
+
+        // 1. Calculate native alpha baseline
+        float currentAlpha = fgVideo->ComputeAlpha();
+
+        // 2. Overwrite alpha value locally if an external early interruption was triggered
+        if (state.isForcedFadingOut && state.fgState == ForegroundState::FadingOut)
         {
-            state.sources[1]->isActive = false;
+            double elapsedFadeTime = fgVideo->internalPTS - state.forcedFadeOutStartTime;
+
+            if (fgVideo->fadeOutDuration > 0.0f)
+            {
+                // Linearly interpolate downward to absolute transparency over the fade out window length
+                float forcedFactor = 1.0f - static_cast<float>(elapsedFadeTime / fgVideo->fadeOutDuration);
+                currentAlpha = (std::min)(currentAlpha, forcedFactor);
+            }
+            else
+            {
+                currentAlpha = 0.0f;
+            }
+        }
+
+        // Apply our final resolved calculation onto the video resource object field
+        fgVideo->alpha = currentAlpha;
+
+        // 3. State Engine evaluation block
+        switch (state.fgState)
+        {
+        case ForegroundState::FadingIn:
+        {
+            if (fgVideo->internalPTS >= fgVideo->fadeInDuration)
+            {
+                state.fgState = ForegroundState::Playing;
+            }
+            break;
+        }
+        case ForegroundState::Playing:
+        {
+            // Native natural file ending boundary check
+            if (fgVideo->duration - fgVideo->internalPTS <= fgVideo->fadeOutDuration)
+            {
+                state.fgState = ForegroundState::FadingOut;
+            }
+            break;
+        }
+        case ForegroundState::FadingOut:
+        {
+            // Terminates cleanly when alpha hitting zero or the actual asset runs completely out of frames
+            if (fgVideo->alpha <= 0.001f || !frameDecoded)
+            {
+                fgVideo->isActive = false;
+                fgVideo->alpha = 0.0f;
+
+                state.currentForegroundIdx = -1;
+                state.fgState = ForegroundState::Idle;
+                state.isForcedFadingOut = false;
+
+                if (state.pendingForegroundIdx != -1)
+                {
+                    int nextIdx = state.pendingForegroundIdx;
+                    state.pendingForegroundIdx = -1;
+
+                    state.currentForegroundIdx = nextIdx;
+                    state.fgState = ForegroundState::FadingIn;
+                    state.sources[nextIdx]->isActive = true;
+                    state.sources[nextIdx]->Rewind();
+                    state.sources[nextIdx]->Play(GetTimeStd());
+                }
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        if (!frameDecoded && state.fgState != ForegroundState::FadingOut)
+        {
+            fgVideo->isActive = false;
+            state.currentForegroundIdx = -1;
+            state.fgState = ForegroundState::Idle;
+            state.isForcedFadingOut = false;
         }
     }
 }
 
 void App::DrawVideos(float width, float height)
 {
-    //Draw the background video frame.
+    // Draw background
     renderer->DrawVideo(state.sources[0], videoShader, 1.0f, false, width, height);
 
-    //If the foreground video is active, draw it on top of the background video with alpha blending.
-    if (state.sources.size() > 1 && state.sources[1]->isActive)
+    if (state.currentForegroundIdx != -1)
     {
-        //Compute alpha of the foreground video
-        float alpha = state.sources[1]->ComputeAlpha();
-        //Draw the foreground video 
-        renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, alpha), true, width, height);
+        int idx = state.currentForegroundIdx;
+        VideoSource* fgVideo = state.sources[idx];
+
+        if (fgVideo->isActive)
+        {
+            float currentAlpha = fgVideo->alpha;
+            renderer->DrawVideo(fgVideo, videoShader, (std::max)(0.0f, currentAlpha), true, width, height);
+        }
     }
 }
 
@@ -207,7 +303,7 @@ LRESULT App::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 LRESULT App::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-    if (msg == WM_DESTROY) 
+    if (msg == WM_DESTROY)
         PostQuitMessage(0);
 
     if (msg == WM_KEYDOWN && wp == VK_ESCAPE)
@@ -215,14 +311,14 @@ LRESULT App::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         DestroyWindow(hwnd);
         return 0;
     }
-    
-    if (msg == WM_KEYDOWN && wp == VK_SPACE) 
+
+    if (msg == WM_KEYDOWN && wp == VK_SPACE)
         spaceBarPressed = true;
-    
+
     if (msg == WM_KEYDOWN && wp == 'F')
         ToggleFullscreen(hwnd);
 
-    if (msg == WM_SIZE && renderer->GetSwapChain()) 
+    if (msg == WM_SIZE && renderer->GetSwapChain())
         renderer->Resize(0, 0);
 
     return DefWindowProc(hwnd, msg, wp, lp);
@@ -232,7 +328,6 @@ void App::ToggleFullscreen(HWND hwnd)
 {
     isFullscreen = !isFullscreen;
     if (isFullscreen) {
-        // Save windowed placement and style, then go borderless fullscreen
         GetWindowPlacement(hwnd, &windowPlacement);
         LONG style = GetWindowLong(hwnd, GWL_STYLE);
         SetWindowLong(hwnd, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
@@ -245,10 +340,8 @@ void App::ToggleFullscreen(HWND hwnd)
             SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 
         while (ShowCursor(FALSE) >= 0);
-
     }
     else {
-        // Restore windowed style and placement
         LONG style = GetWindowLong(hwnd, GWL_STYLE);
         SetWindowLong(hwnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
         SetWindowPlacement(hwnd, &windowPlacement);
