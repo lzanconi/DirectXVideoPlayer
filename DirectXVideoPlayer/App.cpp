@@ -106,6 +106,7 @@ void App::Run()
             if (state.sources.size() > targetFgIndex)
             {
                 state.isSequenceActive = false; // Interrupt any active sequence when spacebar is pressed
+                state.pendingForegroundIdx = -1; // Clear any pending sequence video
                 state.sources[targetFgIndex]->isSequenceLoop = false;
                 state.sources[targetFgIndex]->looped = contentMgr->GetVideoContents().at(targetFgIndex).looped;
                 state.sources[targetFgIndex]->fadeInDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeInDuration;
@@ -307,8 +308,6 @@ void App::ComputeVideoFrames()
                 }
                 else if (state.pendingForegroundIdx != -1)
                 {
-                    state.isSequenceActive = false;
-
                     int nextIdx = state.pendingForegroundIdx;
                     state.pendingForegroundIdx = -1;
 
