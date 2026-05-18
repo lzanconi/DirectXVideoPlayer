@@ -20,7 +20,6 @@ public:
 private:
 	bool isFullscreen = false;
 	bool spaceBarPressed = false;
-	bool fgActive = false;
 	IRenderer* renderer = nullptr;
 	DXShader* videoShader = nullptr;
 	AVBufferRef* hw_ctx;

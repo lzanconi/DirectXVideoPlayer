@@ -30,6 +30,7 @@ public:
     double lastPTS = -1.0;
     double internalPTS = 0.0;
     bool isInitialized = false;
+    bool isActive = false;
     bool looped = false;
     float fadeInDuration = 2.0f;
     float fadeOutDuration = 2.0f;

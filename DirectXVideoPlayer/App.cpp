@@ -110,16 +110,19 @@ void App::Run()
         if (spaceBarPressed)
         {
 			spaceBarPressed = false;
-            fgActive = true;
+            state.sources[1]->isActive = true;
 			state.sources[1]->Rewind();
 			state.sources[1]->Play(GetTimeStd());
         }
 
 		state.sources[0]->GetNextFrame(renderer->GetContext());
-        if (fgActive)
+        if (state.sources.size() > 1 && state.sources[1]->isActive)
         {
+            //If GetNextFrame() returns false, it means the foreground video has reached its end
             if (!state.sources[1]->GetNextFrame(renderer->GetContext()))
-                fgActive = false;
+            {
+                state.sources[1]->isActive = false;
+            }
 		}
 
         RECT rc; 
@@ -130,13 +133,17 @@ void App::Run()
 		renderer->BeginRendering();
 		renderer->DrawVideo(state.sources[0], videoShader, 1.0f, false, w, h);
 
-        if (fgActive)
+        if (state.sources.size() > 1 && state.sources[1]->isActive)
         {
             float fade = 1.0f;
             if (state.sources[1]->internalPTS < state.sources[1]->fadeInDuration)
+            {
                 fade = (float)state.sources[1]->internalPTS / state.sources[1]->fadeInDuration;
+            }
             else if (state.sources[1]->duration - state.sources[1]->internalPTS < state.sources[1]->fadeOutDuration)
+            {
                 fade = (float)(state.sources[1]->duration - state.sources[1]->internalPTS) / state.sources[1]->fadeOutDuration;
+            }
 
             renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, fade), true, w, h);
         }
