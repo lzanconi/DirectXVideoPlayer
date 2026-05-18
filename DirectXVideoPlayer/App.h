@@ -42,6 +42,8 @@ public:
 	std::vector<float> GetPositions() override;
 	double GetLastPTS() override;
 	int64_t GetBGCaptureTimeNS() override;
+	AppState &GetAppState() override;
+
 	void ComputeVideoFrames();
 	void DrawVideos(float width, float height);
 

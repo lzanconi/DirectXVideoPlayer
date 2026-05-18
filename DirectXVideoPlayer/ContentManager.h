@@ -8,12 +8,14 @@ class ContentManager
 {
 private:
 	std::vector<VideoContent> videoContents;
+	std::vector<SequenceItem> sequence;
 	IApp* appInterface;
 
 public:
 	ContentManager(IApp *appInterface);
 	~ContentManager() = default;
 
+	void LoadContents(const std::string& folderPath);
 	// Scans the folder for .mp4 files and matching .csv position files
 	void LoadVideoContentFromFolder(const std::string& folderPath);
 
@@ -23,5 +25,7 @@ public:
 private:
 	// Internal helper to parse position data from CSV files
 	void LoadCSVPositions(VideoContent& content, const std::string& csvPath);
+
+	void LoadSequence(const std::string& folderPath);
 };
 

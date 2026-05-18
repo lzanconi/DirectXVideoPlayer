@@ -15,6 +15,14 @@ enum class ForegroundState
     FadingOut
 };
 
+struct SequenceItem
+{
+    std::string filename;
+    float fadeInDuration = 2.0f;
+    float fadeOutDuration = 2.0f;
+    bool looped = false;
+};  
+
 struct AppState
 {
     int activeIndex = 0;
@@ -35,6 +43,9 @@ struct AppState
     // --- Added for Safe Mid-playback Interruptions without changing native metadata ---
     bool isForcedFadingOut = false;
     double forcedFadeOutStartTime = 0.0;
+
+	std::vector<SequenceItem> sequence;
+    int currentSequenceIdx = -1;
 
     // FPS Tracking
     double lastFPSUpdate = 0;

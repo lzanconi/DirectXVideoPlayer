@@ -9,6 +9,27 @@ namespace fs = std::filesystem;
 
 ContentManager::ContentManager(IApp* appInterface) : appInterface(appInterface) {}
 
+void ContentManager::LoadContents(const std::string& folderPath)
+{
+    try
+    {
+        if (!fs::exists(folderPath) || !fs::is_directory(folderPath))
+        {
+            std::cerr << "Directory does not exist: " << folderPath << std::endl;
+            return;
+        }
+
+        
+        LoadSequence(folderPath);
+
+        LoadVideoContentFromFolder(folderPath);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error loading contents from folder: " << e.what() << std::endl;
+    }
+}
+
 void ContentManager::LoadVideoContentFromFolder(const std::string& folderPath)
 {
 	videoContents.clear();
@@ -133,5 +154,75 @@ void ContentManager::LoadCSVPositions(VideoContent& content, const std::string& 
                 // Skip invalid numeric entries
             }
         }
+    }
+}
+
+void ContentManager::LoadSequence(const std::string& folderPath)
+{
+    std::string sequencePath = "";
+
+    // First pass: scan the folder to see if a sequence text file exists
+    for (const auto& entry : fs::directory_iterator(folderPath))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".txt")
+        {
+            std::string filename = entry.path().filename().string();
+            // Check if filename contains "sequence" (case-insensitive conversion optional, standard find used here)
+            if (filename.find("sequence") != std::string::npos)
+            {
+                sequencePath = entry.path().string();
+                break; // Found sequence definition file
+            }
+        }
+    }
+
+    if (sequencePath.empty())
+        return;
+
+    std::ifstream file(sequencePath);
+    if (!file.is_open())
+    {
+        std::cerr << "Failed to open sequence file: " << sequencePath << std::endl;
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        std::stringstream ss(line);
+        std::string videoName;
+        ss >> videoName; // Extracts token 1 (e.g., "1.mp4")
+
+        SequenceItem seqItem;
+        seqItem.filename = videoName;
+
+        // Loop properties extract block (Key=Value format tracking)
+        std::string propertyToken;
+        while (ss >> propertyToken)
+        {
+            size_t assignmentIdx = propertyToken.find('=');
+            if (assignmentIdx != std::string::npos)
+            {
+                std::string key = propertyToken.substr(0, assignmentIdx);
+                std::string val = propertyToken.substr(assignmentIdx + 1);
+
+                if (key == "fadeIn") {
+                    seqItem.fadeInDuration = std::stof(val);
+                }
+                else if (key == "fadeOut") {
+                    seqItem.fadeOutDuration = std::stof(val);
+                }
+                else if (key == "loop") {
+                    seqItem.looped = (val == "true" || val == "1");
+                }
+            }
+        }
+        sequence.push_back(seqItem);
+
+		appInterface->GetAppState().sequence = sequence;
+		appInterface->GetAppState().currentSequenceIdx = -1; // Start before the first item
     }
 }
