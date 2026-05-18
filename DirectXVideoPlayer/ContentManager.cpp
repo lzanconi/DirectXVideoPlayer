@@ -3,8 +3,11 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include "App.h"
 
 namespace fs = std::filesystem;
+
+ContentManager::ContentManager(IApp* appInterface) : appInterface(appInterface) {}
 
 void ContentManager::LoadVideoContentFromFolder(const std::string& folderPath)
 {

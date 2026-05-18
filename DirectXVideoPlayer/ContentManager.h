@@ -2,13 +2,16 @@
 #include <vector>
 #include "customtypes.h"
 
+class IApp;
+
 class ContentManager
 {
 private:
 	std::vector<VideoContent> videoContents;
+	IApp* appInterface;
 
 public:
-	ContentManager() = default;
+	ContentManager(IApp *appInterface);
 	~ContentManager() = default;
 
 	// Scans the folder for .mp4 files and matching .csv position files

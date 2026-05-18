@@ -13,9 +13,9 @@ AppState App::state;
 
 App::App(int width, int height)
 {
-    ContentManager contentMgr;
-    contentMgr.LoadVideoContentFromFolder(".\\Videos");
-    if (contentMgr.GetVideoContents().empty())
+    contentMgr = new ContentManager(this);
+    contentMgr->LoadVideoContentFromFolder(".\\Videos");
+    if (contentMgr->GetVideoContents().empty())
     {
         MessageBoxA(nullptr, "No .mp4 files found in the Videos folder.", "Error", MB_ICONERROR);
     }
@@ -34,7 +34,7 @@ App::App(int width, int height)
     videoShader = new DXShader();
     videoShader->LoadFromFile(renderer->GetDevice(), L"shaders.hlsl");
 
-    for (const auto& videoContent : contentMgr.GetVideoContents())
+    for (const auto& videoContent : contentMgr->GetVideoContents())
     {
         VideoSource* videoSource = new VideoSource();
         if (videoSource->OpenFile(videoContent.filename, renderer->GetDevice(), renderer->GetContext()))
@@ -83,6 +83,9 @@ App::~App()
 
     if (videoShader)
         delete videoShader;
+
+    if (contentMgr)
+		delete contentMgr;
 }
 
 void App::Run()

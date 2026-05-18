@@ -22,6 +22,7 @@ private:
 	bool spaceBarPressed = false;
 	IRenderer* renderer = nullptr;
 	DXShader* videoShader = nullptr;
+	ContentManager* contentMgr = nullptr;
 	AVBufferRef* hw_ctx;
 	AVPacket* raw_packet;
 	AVFrame* frame;
