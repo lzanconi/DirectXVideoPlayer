@@ -46,6 +46,7 @@ struct AppState
 
 	std::vector<SequenceItem> sequence;
     int currentSequenceIdx = -1;
+    bool isSequenceActive = false;
 
     // FPS Tracking
     double lastFPSUpdate = 0;

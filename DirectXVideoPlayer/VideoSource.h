@@ -32,6 +32,8 @@ public:
     bool isInitialized = false;
     bool isActive = false;
     bool looped = false;
+    bool isSequenceLoop = false;
+    bool fadeInComplete = false;
     float fadeInDuration = 2.0f;
     float fadeOutDuration = 2.0f;
 	float alpha = 1.0f;

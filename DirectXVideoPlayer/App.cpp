@@ -101,12 +101,25 @@ void App::Run()
         if (spaceBarPressed)
         {
             spaceBarPressed = false;
-
             int targetFgIndex = 1;
 
             if (state.sources.size() > targetFgIndex)
             {
+				state.isSequenceActive = false; // Interrupt any active sequence when spacebar is pressed
+				state.sources[targetFgIndex]->isSequenceLoop = false;
                 RequestForegroundVideo(targetFgIndex);
+            }
+        }
+
+        if (sKeyPressed)
+        {
+            sKeyPressed = false;
+
+            if (!state.sequence.empty())
+            {
+                state.isSequenceActive = true;
+                state.currentSequenceIdx = 0;
+                AdvanceSequence();
             }
         }
 
@@ -132,6 +145,8 @@ void App::RequestForegroundVideo(int index)
         state.fgState = ForegroundState::FadingIn;
         state.isForcedFadingOut = false;
         state.sources[index]->isActive = true;
+        state.sources[index]->alpha = 0.0f;
+        state.sources[index]->fadeInComplete = false;
         state.sources[index]->Rewind();
         state.sources[index]->Play(GetTimeStd());
     }
@@ -147,6 +162,47 @@ void App::RequestForegroundVideo(int index)
         // we capture the specific timestamp frame where the fade-out interruption was requested.
         state.isForcedFadingOut = true;
         state.forcedFadeOutStartTime = activeVideo->internalPTS;
+    }
+}
+
+void App::AdvanceSequence()
+{
+    if (!state.isSequenceActive || state.currentSequenceIdx < 0 || state.currentSequenceIdx >= state.sequence.size())
+    {
+        state.isSequenceActive = false;
+        state.currentSequenceIdx = -1;
+        return;
+    }
+
+    const auto& seqItem = state.sequence[state.currentSequenceIdx];
+
+    // Search for a matching VideoSource index by checking file names
+    int matchIdx = -1;
+    for (size_t i = 0; i < state.sources.size(); ++i)
+    {
+        if (state.sources[i]->file_name == seqItem.filename)
+        {
+            matchIdx = static_cast<int>(i);
+            break;
+        }
+    }
+
+    if (matchIdx != -1)
+    {
+        // Override the video source rules using sequence rules configuration definitions
+        state.sources[matchIdx]->fadeInDuration = seqItem.fadeInDuration;
+        state.sources[matchIdx]->fadeOutDuration = seqItem.fadeOutDuration;
+        state.sources[matchIdx]->looped = seqItem.looped;
+		state.sources[matchIdx]->isSequenceLoop = seqItem.looped;
+
+        // Force launch video through standard player pipeline
+        RequestForegroundVideo(matchIdx);
+    }
+    else
+    {
+        // If a file from the sequence is missing in the video folder, jump to next sequence step
+        state.currentSequenceIdx++;
+        AdvanceSequence();
     }
 }
 
@@ -180,33 +236,23 @@ void App::ComputeVideoFrames()
     // Compute frame for the background video
     state.sources[0]->GetNextFrame(renderer->GetContext());
 
-    //Checks if a foreground video is currently active. 
-    //If state.currentForegroundIdx is -1, it means no foreground video is selected and skips the rest of the logic
     if (state.currentForegroundIdx != -1)
     {
-        //Grab a pointer to the current foreground video
         int idx = state.currentForegroundIdx;
         VideoSource* fgVideo = state.sources[idx];
 
-		//Attempt to decode the next frame for the active foreground video. 
-		//It returns true if a new frame was successfully decoded, or false if the video has reached its natural end
+        // Attempt to decode the next frame
         bool frameDecoded = fgVideo->GetNextFrame(renderer->GetContext());
 
-		//Compute the alpha value for the current frame based on its own internal timing and fade parameters
+        // Compute alpha value
         float currentAlpha = fgVideo->ComputeAlpha();
 
-		//FORCED FADE OUT LOGIC:
-        //Checks if this fade-out phase was forced early by a user pressing the spacebar mid-playback
+        // FORCED FADE OUT LOGIC (Spacebar overrides)
         if (state.isForcedFadingOut && state.fgState == ForegroundState::FadingOut)
         {
-            //Calculates how many seconds have passed since the user interrupted the video. 
-            //It subtracts the playhead time when the button was pressed from the current playhead time.
             double elapsedFadeTime = fgVideo->internalPTS - state.forcedFadeOutStartTime;
-
-            //Check if the video has to fade out 
             if (fgVideo->fadeOutDuration > 0.0f)
             {
-                // Linearly interpolate downward to absolute transparency over the fade out window length
                 float forcedFactor = 1.0f - static_cast<float>(elapsedFadeTime / fgVideo->fadeOutDuration);
                 currentAlpha = (std::min)(currentAlpha, forcedFactor);
             }
@@ -216,10 +262,9 @@ void App::ComputeVideoFrames()
             }
         }
 
-        //Updates the actual variable used by the DirectX renderer to fade out the video texture
         fgVideo->alpha = currentAlpha;
 
-        // 3. State Engine evaluation block
+        // State Engine evaluation block
         switch (state.fgState)
         {
         case ForegroundState::FadingIn:
@@ -232,8 +277,8 @@ void App::ComputeVideoFrames()
         }
         case ForegroundState::Playing:
         {
-            // Native natural file ending boundary check
-            if (fgVideo->duration - fgVideo->internalPTS <= fgVideo->fadeOutDuration)
+            // Only enter fade out if it's not a sequence loop
+            if (!fgVideo->isSequenceLoop && (fgVideo->duration - fgVideo->internalPTS <= fgVideo->fadeOutDuration))
             {
                 state.fgState = ForegroundState::FadingOut;
             }
@@ -241,7 +286,7 @@ void App::ComputeVideoFrames()
         }
         case ForegroundState::FadingOut:
         {
-            // Terminates cleanly when alpha hitting zero or the actual asset runs completely out of frames
+            // CRITICAL FIX: If alpha hits zero OR the asset runs out of frames early, cleanly terminate!
             if (fgVideo->alpha <= 0.001f || !frameDecoded)
             {
                 fgVideo->isActive = false;
@@ -251,14 +296,27 @@ void App::ComputeVideoFrames()
                 state.fgState = ForegroundState::Idle;
                 state.isForcedFadingOut = false;
 
-                if (state.pendingForegroundIdx != -1)
+                // --- SEQUENCING PIPELINE HOOK ---
+                if (state.isSequenceActive && state.pendingForegroundIdx == -1)
                 {
+                    if (!fgVideo->isSequenceLoop)
+                    {
+                        state.currentSequenceIdx++;
+                        AdvanceSequence();
+                    }
+                }
+                else if (state.pendingForegroundIdx != -1)
+                {
+                    state.isSequenceActive = false;
+
                     int nextIdx = state.pendingForegroundIdx;
                     state.pendingForegroundIdx = -1;
 
                     state.currentForegroundIdx = nextIdx;
                     state.fgState = ForegroundState::FadingIn;
                     state.sources[nextIdx]->isActive = true;
+                    state.sources[nextIdx]->alpha = 0.0f;
+                    state.sources[nextIdx]->fadeInComplete = false;
                     state.sources[nextIdx]->Rewind();
                     state.sources[nextIdx]->Play(GetTimeStd());
                 }
@@ -269,12 +327,21 @@ void App::ComputeVideoFrames()
             break;
         }
 
-        if (!frameDecoded && state.fgState != ForegroundState::FadingOut)
+        // Catch-all safety: If it dies unexpectedly outside of FadingOut.
+        // Guard with idx check so this doesn't re-fire if FadingOut already cleaned up and started the next video.
+        if (!frameDecoded && state.fgState != ForegroundState::FadingOut && state.currentForegroundIdx == idx)
         {
             fgVideo->isActive = false;
+            fgVideo->alpha = 0.0f;
             state.currentForegroundIdx = -1;
             state.fgState = ForegroundState::Idle;
             state.isForcedFadingOut = false;
+
+            if (state.isSequenceActive)
+            {
+                state.currentSequenceIdx++;
+                AdvanceSequence();
+            }
         }
     }
 }
@@ -331,6 +398,9 @@ LRESULT App::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     if (msg == WM_KEYDOWN && wp == VK_SPACE)
         spaceBarPressed = true;
+
+    if (msg == WM_KEYDOWN && wp == 'S')
+        sKeyPressed = true;
 
     if (msg == WM_KEYDOWN && wp == 'F')
         ToggleFullscreen(hwnd);

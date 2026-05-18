@@ -20,6 +20,7 @@ public:
 private:
 	bool isFullscreen = false;
 	bool spaceBarPressed = false;
+	bool sKeyPressed = false;
 	IRenderer* renderer = nullptr;
 	DXShader* videoShader = nullptr;
 	ContentManager* contentMgr = nullptr;
@@ -49,6 +50,7 @@ public:
 
 private:
 	void RequestForegroundVideo(int index);
+	void AdvanceSequence();
 
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 	LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);

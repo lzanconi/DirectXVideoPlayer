@@ -167,7 +167,6 @@ void ContentManager::LoadSequence(const std::string& folderPath)
         if (entry.is_regular_file() && entry.path().extension() == ".txt")
         {
             std::string filename = entry.path().filename().string();
-            // Check if filename contains "sequence" (case-insensitive conversion optional, standard find used here)
             if (filename.find("sequence") != std::string::npos)
             {
                 sequencePath = entry.path().string();
@@ -189,25 +188,46 @@ void ContentManager::LoadSequence(const std::string& folderPath)
     std::string line;
     while (std::getline(file, line))
     {
+        // Trim or check for empty lines and comments
         if (line.empty() || line[0] == '#')
             continue;
 
         std::stringstream ss(line);
         std::string videoName;
-        ss >> videoName; // Extracts token 1 (e.g., "1.mp4")
+
+        // 1. Extract the first token up to the first comma (the video name)
+        if (!std::getline(ss, videoName, ','))
+            continue;
+
+        // Helper lambda to trim whitespace from both ends of parsed strings
+        auto trim = [](std::string& str) {
+            str.erase(0, str.find_first_not_of(" \t\r\n"));
+            str.erase(str.find_last_not_of(" \t\r\n") + 1);
+            };
+
+        trim(videoName);
+        if (videoName.empty())
+            continue;
 
         SequenceItem seqItem;
         seqItem.filename = videoName;
 
-        // Loop properties extract block (Key=Value format tracking)
+        // 2. Extract remaining properties separated by commas
         std::string propertyToken;
-        while (ss >> propertyToken)
+        while (std::getline(ss, propertyToken, ','))
         {
+            trim(propertyToken);
+            if (propertyToken.empty())
+                continue;
+
             size_t assignmentIdx = propertyToken.find('=');
             if (assignmentIdx != std::string::npos)
             {
                 std::string key = propertyToken.substr(0, assignmentIdx);
                 std::string val = propertyToken.substr(assignmentIdx + 1);
+
+                trim(key);
+                trim(val);
 
                 if (key == "fadeIn") {
                     seqItem.fadeInDuration = std::stof(val);
@@ -222,7 +242,7 @@ void ContentManager::LoadSequence(const std::string& folderPath)
         }
         sequence.push_back(seqItem);
 
-		appInterface->GetAppState().sequence = sequence;
-		appInterface->GetAppState().currentSequenceIdx = -1; // Start before the first item
+        appInterface->GetAppState().sequence = sequence;
+        appInterface->GetAppState().currentSequenceIdx = -1; // Start before the first item
     }
 }

@@ -200,11 +200,18 @@ void VideoSource::Rewind()
 float VideoSource::ComputeAlpha()
 {
     alpha = 1.0f;
-    if (internalPTS < fadeInDuration)
+
+    if (!fadeInComplete)
     {
-        alpha = (float)internalPTS / fadeInDuration;
+        if (internalPTS < fadeInDuration)
+        {
+            alpha = (float)internalPTS / fadeInDuration;
+            return alpha;
+        }
+        fadeInComplete = true;
     }
-    else if (duration - internalPTS < fadeOutDuration)
+
+    if (!isSequenceLoop && (duration - internalPTS < fadeOutDuration))
     {
         alpha = (float)(duration - internalPTS) / fadeOutDuration;
     }
