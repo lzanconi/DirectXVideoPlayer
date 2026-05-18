@@ -85,7 +85,7 @@ App::~App()
         delete videoShader;
 
     if (contentMgr)
-		delete contentMgr;
+        delete contentMgr;
 }
 
 void App::Run()
@@ -105,11 +105,11 @@ void App::Run()
 
             if (state.sources.size() > targetFgIndex)
             {
-				state.isSequenceActive = false; // Interrupt any active sequence when spacebar is pressed
-				state.sources[targetFgIndex]->isSequenceLoop = false;
-				state.sources[targetFgIndex]->looped = contentMgr->GetVideoContents().at(targetFgIndex).looped;
-				state.sources[targetFgIndex]->fadeInDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeInDuration;
-				state.sources[targetFgIndex]->fadeOutDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeOutDuration;
+                state.isSequenceActive = false; // Interrupt any active sequence when spacebar is pressed
+                state.sources[targetFgIndex]->isSequenceLoop = false;
+                state.sources[targetFgIndex]->looped = contentMgr->GetVideoContents().at(targetFgIndex).looped;
+                state.sources[targetFgIndex]->fadeInDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeInDuration;
+                state.sources[targetFgIndex]->fadeOutDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeOutDuration;
                 RequestForegroundVideo(targetFgIndex);
             }
         }
@@ -196,7 +196,7 @@ void App::AdvanceSequence()
         state.sources[matchIdx]->fadeInDuration = seqItem.fadeInDuration;
         state.sources[matchIdx]->fadeOutDuration = seqItem.fadeOutDuration;
         state.sources[matchIdx]->looped = seqItem.looped;
-		state.sources[matchIdx]->isSequenceLoop = seqItem.looped;
+        state.sources[matchIdx]->isSequenceLoop = seqItem.looped;
 
         // Force launch video through standard player pipeline
         RequestForegroundVideo(matchIdx);
@@ -229,7 +229,7 @@ int64_t App::GetBGCaptureTimeNS()
     return state.sources[0]->bg_capture_time_ns;
 }
 
-AppState &App::GetAppState()
+AppState& App::GetAppState()
 {
     return state;
 }
@@ -254,15 +254,12 @@ void App::ComputeVideoFrames()
         if (state.isForcedFadingOut && state.fgState == ForegroundState::FadingOut)
         {
             double elapsedFadeTime = fgVideo->internalPTS - state.forcedFadeOutStartTime;
-            if (fgVideo->fadeOutDuration > 0.0f)
-            {
-                float forcedFactor = 1.0f - static_cast<float>(elapsedFadeTime / fgVideo->fadeOutDuration);
-                currentAlpha = (std::min)(currentAlpha, forcedFactor);
-            }
-            else
-            {
-                currentAlpha = 0.0f;
-            }
+
+            // Use the video's fadeOutDuration, or a minimum of 1.0 second if it's 0
+            float effectiveFadeOutDuration = (fgVideo->fadeOutDuration > 0.0f) ? fgVideo->fadeOutDuration : 1.0f;
+
+            float forcedFactor = 1.0f - static_cast<float>(elapsedFadeTime / effectiveFadeOutDuration);
+            currentAlpha = (std::min)(currentAlpha, forcedFactor);
         }
 
         fgVideo->alpha = currentAlpha;
