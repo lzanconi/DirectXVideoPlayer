@@ -56,6 +56,11 @@ App::App(int width, int height)
         }
     }
 
+    for (const auto & source : state.sources)
+    {
+        std::cout << "VideoSource: " << source->file_name << " Duration: " << GetDurationMinSec(static_cast<int>(source->duration)) << std::endl;
+	}
+
  //   bgVideo = new VideoSource();
 	//fgVideo = new VideoSource();
 

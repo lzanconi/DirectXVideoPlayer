@@ -35,6 +35,7 @@ public:
     float fadeOutDuration = 2.0f;
     std::atomic<int64_t> bg_capture_time_ns;
     std::vector<float> positions;
+    std::string file_name;
 
 public:
 	VideoSource() = default;

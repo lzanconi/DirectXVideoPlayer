@@ -32,6 +32,7 @@ VideoSource::~VideoSource()
 
 bool VideoSource::OpenFile(const std::string& path, ID3D11Device* device, ID3D11DeviceContext* context)
 {
+	file_name = GetFilenameFromPath(path);
     //Opens the video file and reads the header to understand the container format
     if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0)
     {
