@@ -76,6 +76,12 @@ App::App(int width, int height)
 
 App::~App()
 {
+    if (state.networkMgr)
+    {
+        state.networkMgr->Stop();
+        delete state.networkMgr;
+    }
+
     for (auto source : state.sources)
         delete source;
 
