@@ -115,29 +115,19 @@ void App::Run()
 			state.sources[1]->Play(GetTimeStd());
         }
 
-		state.sources[0]->GetNextFrame(renderer->GetContext());
-        if (state.sources.size() > 1 && state.sources[1]->isActive)
-        {
-            //If GetNextFrame() returns false, it means the foreground video has reached its end
-            if (!state.sources[1]->GetNextFrame(renderer->GetContext()))
-            {
-                state.sources[1]->isActive = false;
-            }
-		}
-
+		//Compute the frames of each active video (background and foreground) before rendering
+        ComputeVideoFrames();
+        
         RECT rc; 
         GetClientRect(window, &rc);
         float w = (float)(rc.right - rc.left);
         float h = (float)(rc.bottom - rc.top);
 
+        //Begin DirectX rendering.
 		renderer->BeginRendering();
-		renderer->DrawVideo(state.sources[0], videoShader, 1.0f, false, w, h);
 
-        if (state.sources.size() > 1 && state.sources[1]->isActive)
-        {
-			float alpha = state.sources[1]->ComputeAlpha();
-            renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, alpha), true, w, h);
-        }
+		//Draw the videos (background and foreground if active) for the current frame
+		DrawVideos(w, h);
 
         renderer->EndRendering();
 	}
@@ -161,6 +151,37 @@ double App::GetLastPTS()
 int64_t App::GetBGCaptureTimeNS()
 {
 	return state.sources[0]->bg_capture_time_ns;
+}
+
+void App::ComputeVideoFrames()
+{
+    //Compute frame for the background video.
+    state.sources[0]->GetNextFrame(renderer->GetContext());
+
+    //Compute frame for the foreground video if it's active and it has not reached its end.
+    if (state.sources.size() > 1 && state.sources[1]->isActive)
+    {
+        //If GetNextFrame() returns false, it means the foreground video has reached its end
+        if (!state.sources[1]->GetNextFrame(renderer->GetContext()))
+        {
+            state.sources[1]->isActive = false;
+        }
+    }
+}
+
+void App::DrawVideos(float width, float height)
+{
+    //Draw the background video frame.
+    renderer->DrawVideo(state.sources[0], videoShader, 1.0f, false, width, height);
+
+    //If the foreground video is active, draw it on top of the background video with alpha blending.
+    if (state.sources.size() > 1 && state.sources[1]->isActive)
+    {
+        //Compute alpha of the foreground video
+        float alpha = state.sources[1]->ComputeAlpha();
+        //Draw the foreground video 
+        renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, alpha), true, width, height);
+    }
 }
 
 LRESULT App::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)

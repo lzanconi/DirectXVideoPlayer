@@ -42,6 +42,8 @@ public:
 	std::vector<float> GetPositions() override;
 	double GetLastPTS() override;
 	int64_t GetBGCaptureTimeNS() override;
+	void ComputeVideoFrames();
+	void DrawVideos(float width, float height);
 
 private:
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
