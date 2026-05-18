@@ -122,7 +122,7 @@ void App::Run()
         float w = (float)(rc.right - rc.left);
         float h = (float)(rc.bottom - rc.top);
 
-		renderer->BeginFrame();
+		renderer->BeginRendering();
 		renderer->DrawVideo(state.sources[0], videoShader, 1.0f, false, w, h);
 
         if (fgActive)
@@ -136,7 +136,7 @@ void App::Run()
             renderer->DrawVideo(state.sources[1], videoShader, max(0.0f, fade), true, w, h);
         }
 
-        renderer->EndFrame();
+        renderer->EndRendering();
 	}
 }
 

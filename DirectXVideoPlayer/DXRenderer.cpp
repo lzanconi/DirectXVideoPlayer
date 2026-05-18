@@ -84,7 +84,7 @@ void DXRenderer::Resize(int width, int height)
     bb->Release();
 }
 
-void DXRenderer::BeginFrame()
+void DXRenderer::BeginRendering()
 {
     float clearColor[4] = { 0, 0, 0, 1 };
     context->ClearRenderTargetView(rtv, clearColor);
@@ -95,7 +95,7 @@ void DXRenderer::BeginFrame()
     context->OMSetRenderTargets(1, &rtv, nullptr);
 }
 
-void DXRenderer::EndFrame()
+void DXRenderer::EndRendering()
 {
     swapChain->Present(1, 0);
 }
