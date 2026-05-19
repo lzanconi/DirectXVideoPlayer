@@ -11,6 +11,8 @@ class NetworkManager;
 struct AVBufferRef;
 struct AVPacket;
 struct AVFrame;
+struct ID3D11Device;
+struct ID3D11DeviceContext;
 
 class App : public IApp
 {
@@ -49,6 +51,7 @@ public:
 	void DrawVideos(float width, float height);
 
 private:
+	void LoadVideoSources(ID3D11Device* device, ID3D11DeviceContext* context);
 	void RequestForegroundVideo(int index);
 	void AdvanceSequence();
 

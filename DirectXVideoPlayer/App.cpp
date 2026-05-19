@@ -34,29 +34,8 @@ App::App(int width, int height)
     videoShader = new DXShader();
     videoShader->LoadFromFile(renderer->GetDevice(), L"shaders.hlsl");
 
-    for (const auto& videoContent : contentMgr->GetVideoContents())
-    {
-        VideoSource* videoSource = new VideoSource();
-        if (videoSource->OpenFile(videoContent.filename, renderer->GetDevice(), renderer->GetContext()))
-        {
-            videoSource->fadeInDuration = videoContent.fadeInDuration;
-            videoSource->fadeOutDuration = videoContent.fadeOutDuration;
-            videoSource->looped = videoContent.looped;
-            videoSource->positions = videoContent.positions;
-            state.sources.push_back(videoSource);
-        }
-        else
-        {
-            std::cerr << "Failed to open video: " << videoContent.filename << std::endl;
-            delete videoSource;
-        }
-    }
-
-    for (const auto& source : state.sources)
-    {
-        std::cout << "VideoSource: " << source->file_name << " Duration: " << GetDurationMinSec(static_cast<int>(source->duration)) << std::endl;
-    }
-
+	LoadVideoSources(renderer->GetDevice(), renderer->GetContext());    
+    
     state.sources[0]->looped = true;
     state.sources[0]->Play(GetTimeStd());
 
@@ -138,6 +117,33 @@ void App::Run()
         DrawVideos(w, h);
         renderer->EndRendering();
     }
+}
+
+void App::LoadVideoSources(ID3D11Device* device, ID3D11DeviceContext* context)
+{
+    for (const auto& videoContent : contentMgr->GetVideoContents())
+    {
+        VideoSource* videoSource = new VideoSource();
+        if (videoSource->OpenFile(videoContent.filename, device, context))
+        {
+            videoSource->fadeInDuration = videoContent.fadeInDuration;
+            videoSource->fadeOutDuration = videoContent.fadeOutDuration;
+            videoSource->looped = videoContent.looped;
+            videoSource->positions = videoContent.positions;
+            state.sources.push_back(videoSource);
+        }
+        else
+        {
+            std::cerr << "Failed to open video: " << videoContent.filename << std::endl;
+            delete videoSource;
+        }
+    }
+
+    for (const auto& source : state.sources)
+    {
+        std::cout << "VideoSource: " << source->file_name << " Duration: " << GetDurationMinSec(static_cast<int>(source->duration)) << std::endl;
+    }
+
 }
 
 void App::RequestForegroundVideo(int index)
