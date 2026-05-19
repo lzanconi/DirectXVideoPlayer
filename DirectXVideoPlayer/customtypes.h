@@ -18,8 +18,8 @@ enum class ForegroundState
 struct SequenceItem
 {
     std::string filename;
-    float fadeInDuration = 2.0f;
-    float fadeOutDuration = 2.0f;
+    float fadeInDuration = 0.0f;
+    float fadeOutDuration = 0.0f;
     bool looped = false;
 };  
 
