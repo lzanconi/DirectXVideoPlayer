@@ -72,41 +72,49 @@ App::~App()
         delete contentMgr;
 }
 
+/*
+This function handles the window messaging system, process logic state evaluations, frame updates, and rendering pipelines
+*/
 void App::Run()
 {
+	//Keep running as long as you don't receive WM_QUIT message that means the application is closing
     while (msg.message != WM_QUIT)
     {
+        //Checks if there are any pending window messages like keyboard strokes, mouse movements etc.
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
         {
+			//Forwards the retrieved messages to the WndProc message handler
             DispatchMessage(&msg);
+
+            //Forces the program to skip rendering/processing when a new message is received, 
+            //prioritizing input responsiveness over drawing.
             continue;
         }
 
+		//NORMAL FOREGROUND TRIGGER LOGIC
+		//SPACEBAR key press message received (NORMAL FOREGROUND TRIGGER)
         if (spaceBarPressed)
         {
+			//Reset the spaceBarPressed flag immediately to prevent multiple triggers from a single key press
             spaceBarPressed = false;
-            int targetFgIndex = 1;
 
-            if (state.sources.size() > targetFgIndex)
-            {
-                state.isSequenceActive = false; // Interrupt any active sequence when spacebar is pressed
-                state.pendingForegroundIdx = -1; // Clear any pending sequence video
-                state.sources[targetFgIndex]->isSequenceLoop = false;
-                state.sources[targetFgIndex]->looped = contentMgr->GetVideoContents().at(targetFgIndex).looped;
-                state.sources[targetFgIndex]->fadeInDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeInDuration;
-                state.sources[targetFgIndex]->fadeOutDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeOutDuration;
-                RequestForegroundVideo(targetFgIndex);
-            }
+            //Trigger the playback of the next foreground video (for now it's always the second video video in the list at index 1)
+			TriggerForegroundVideo(1);
         }
 
         if (sKeyPressed)
         {
             sKeyPressed = false;
 
+            //Check if a sequence was loaded
             if (!state.sequence.empty())
             {
+				//Enable sequence mode which will override normal foreground triggering and force the videos to play in the order defined by the sequence configuration
                 state.isSequenceActive = true;
+                //Resets the sequence pointer back to the first item
                 state.currentSequenceIdx = 0;
+
+                //Load and play the first video in the sequence
                 AdvanceSequence();
             }
         }
@@ -118,8 +126,15 @@ void App::Run()
         float w = (float)(rc.right - rc.left);
         float h = (float)(rc.bottom - rc.top);
 
+
+        //Commands the DirectX 11 backend to clear the screen to black, re-bind the geometric vertex buffers, 
+        //and prime the pipeline to receive new draw commands.
         renderer->BeginRendering();
+
+        //Draw the videos
         DrawVideos(w, h);
+
+        //Swap the back buffer to the screen
         renderer->EndRendering();
     }
 }
@@ -244,6 +259,28 @@ void App::StartNetworkManager(const std::string& serverIP, int serverPort)
 {
     state.networkMgr = new NetworkManager(serverIP, serverPort, this);
     state.networkMgr->Start();
+}
+
+void App::TriggerForegroundVideo(int targetFgIndex)
+{
+    //Ensures that the target index is within bounds of the loaded video sources
+    if (state.sources.size() > targetFgIndex)
+    {
+        //Interrupts any active sequence to allow for manual foreground triggering without waiting for sequence completion
+        state.isSequenceActive = false;
+        //Clears out any sequence video or a foreground video that is waiting that the previous one has completed its fade out
+        state.pendingForegroundIdx = -1;
+        //Restores the target foreground video configuration to its defaults.
+        // 
+        //This removes any customized values that might have been applied to it while running in a sequence
+        state.sources[targetFgIndex]->isSequenceLoop = false;
+        state.sources[targetFgIndex]->looped = contentMgr->GetVideoContents().at(targetFgIndex).looped;
+        state.sources[targetFgIndex]->fadeInDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeInDuration;
+        state.sources[targetFgIndex]->fadeOutDuration = contentMgr->GetVideoContents().at(targetFgIndex).fadeOutDuration;
+
+        //Launch the playback of the foreground video 
+        RequestForegroundVideo(targetFgIndex);
+    }
 }
 
 VideoSource* App::GetBackgroundVideo()
