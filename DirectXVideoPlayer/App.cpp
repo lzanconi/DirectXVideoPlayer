@@ -13,6 +13,7 @@ AppState App::state;
 
 App::App(int width, int height)
 {
+    //Load all videos from a specified folder
     contentMgr = new ContentManager(this);
     contentMgr->LoadContents(".\\Videos");
     if (contentMgr->GetVideoContents().empty())
@@ -20,24 +21,28 @@ App::App(int width, int height)
         MessageBoxA(nullptr, "No .mp4 files found in the Videos folder.", "Error", MB_ICONERROR);
     }
 
+	//Create a window to contain the DirectX rendering output
     wndClass.lpfnWndProc = WndProc;
     wndClass.lpszClassName = L"VP";
     wndClass.hInstance = GetModuleHandle(NULL);
     RegisterClass(&wndClass);
     window = CreateWindow(L"VP", L"OOP Video Player", WS_OVERLAPPEDWINDOW, 100, 100, width, height, 0, 0, wndClass.hInstance, this);
 
+	//Initialize DirectX renderer and link it to the created window
     DXRenderer* dxRenderer = new DXRenderer();
     dxRenderer->Initialize(window);
     renderer = dxRenderer;
     state.renderer = renderer;
 
+	//Load the HLSL shader that will be used to render the video textures with alpha blending
     videoShader = new DXShader();
     videoShader->LoadFromFile(renderer->GetDevice(), L"shaders.hlsl");
 
+	//For each video loaded by the ContentManager, create a corresponding VideoSource instance 
 	LoadVideoSources(renderer->GetDevice(), renderer->GetContext());    
     
-    state.sources[0]->looped = true;
-    state.sources[0]->Play(GetTimeStd());
+	//Immediately start playing the first video as the background layer, looping indefinitely
+	StartBackgroundVideo(0, true);
 
     ShowWindow(window, SW_SHOW);
     ToggleFullscreen(window);
@@ -144,6 +149,12 @@ void App::LoadVideoSources(ID3D11Device* device, ID3D11DeviceContext* context)
         std::cout << "VideoSource: " << source->file_name << " Duration: " << GetDurationMinSec(static_cast<int>(source->duration)) << std::endl;
     }
 
+}
+
+void App::StartBackgroundVideo(int sourceIndex, bool shouldLoop)
+{
+    state.sources[sourceIndex]->looped = shouldLoop;
+    state.sources[sourceIndex]->Play(GetTimeStd());
 }
 
 void App::RequestForegroundVideo(int index)

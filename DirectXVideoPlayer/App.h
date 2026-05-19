@@ -52,6 +52,7 @@ public:
 
 private:
 	void LoadVideoSources(ID3D11Device* device, ID3D11DeviceContext* context);
+	void StartBackgroundVideo(int sourceIndex, bool shouldLoop);
 	void RequestForegroundVideo(int index);
 	void AdvanceSequence();
 
