@@ -172,43 +172,62 @@ void App::StartBackgroundVideo(int sourceIndex, bool shouldLoop)
     state.sources[sourceIndex]->Play(GetTimeStd());
 }
 
+/*
+Handles the triggering of a foreground video playback
+*/
 void App::RequestForegroundVideo(int index)
 {
-    // Case 1: Video engine is completely idling. Fade in normally.
+    //CASE 1: No foreground video is playing, Fade in normally
     if (state.fgState == ForegroundState::Idle)
     {
+        //Set which foreground video we want to play
         state.currentForegroundIdx = index;
+        //Advances the state machine's operational status from Idle to FadingIn
         state.fgState = ForegroundState::FadingIn;
+        //Ensures that any manual interruptions from previous video changes are completely cleared out for this fresh playback session
         state.isForcedFadingOut = false;
         state.sources[index]->isActive = true;
         state.sources[index]->fadeInComplete = false;
         state.sources[index]->alpha = 0.0f;
         
+        //Rewind the foreground video
         state.sources[index]->Rewind();
+        //Start to play the foreground video
         state.sources[index]->Play(GetTimeStd());
         
-        // Decode first frame immediately to avoid green flash on instant cuts
+		//IMPORTANT: We need to decode the first frame of the video immediately to ensure that the shader has valid texture data
+        //Decode first frame immediately to avoid green flash on instant cuts
         state.sources[index]->GetNextFrame(renderer->GetContext());
         
-        // If fadeInDuration is 0, start at full opacity for instant cut
+        // If video fadeInDuration properties is 0, start at full opacity for instant cut
         if (state.sources[index]->fadeInDuration <= 0.0f)
         {
             state.sources[index]->alpha = 1.0f;
+            //Bypass the fade-in process
             state.sources[index]->fadeInComplete = true;
+			//Directly transition to Playing state
             state.fgState = ForegroundState::Playing;
         }
     }
-    // Case 2: Already active or fading in. Force a localized transition to fade out.
+    //CASE 2: If a foreground video is already actively on screen or currently in the middle of fading in, and it hasn't already 
+    //been commanded to exit (!state.isForcedFadingOut), the engine processes a mid-playback interruption transition
     else if ((state.fgState == ForegroundState::Playing || state.fgState == ForegroundState::FadingIn) && !state.isForcedFadingOut)
     {
+		//Stores the requested new video's index position, queuing it to load immediately after the current video finishes its fade-out sequence
         state.pendingForegroundIdx = index;
+		//Advances the state machine into the FadingOut
         state.fgState = ForegroundState::FadingOut;
 
+		//Get a pointer to the currently active foreground video that we want to fade out
         VideoSource* activeVideo = state.sources[state.currentForegroundIdx];
 
         // Instead of mutating activeVideo->duration directly which breaks later triggers,
         // we capture the specific timestamp frame where the fade-out interruption was requested.
+
+        //Tells to use custom interpolation for manually fading out un uncompleted video 
         state.isForcedFadingOut = true;
+        //Captures the precise playback timestamp position where the interruption occurred
+        //It will be used as the baseline to calculate the custom fade out speed until opacity hits zero
         state.forcedFadeOutStartTime = activeVideo->internalPTS;
     }
 }
