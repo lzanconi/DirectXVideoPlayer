@@ -47,8 +47,8 @@ App::App(int width, int height)
     ShowWindow(window, SW_SHOW);
     ToggleFullscreen(window);
 
-    state.networkMgr = new NetworkManager("127.0.0.1", 5555, this);
-    //state.networkMgr->Start();
+    //Start NetworkManager to send positions
+	StartNetworkManager("127.0.0.1", 5555);
 }
 
 App::~App()
@@ -238,6 +238,12 @@ void App::AdvanceSequence()
         state.currentSequenceIdx++;
         AdvanceSequence();
     }
+}
+
+void App::StartNetworkManager(const std::string& serverIP, int serverPort)
+{
+    state.networkMgr = new NetworkManager(serverIP, serverPort, this);
+    state.networkMgr->Start();
 }
 
 VideoSource* App::GetBackgroundVideo()

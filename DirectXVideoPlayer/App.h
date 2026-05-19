@@ -55,6 +55,7 @@ private:
 	void StartBackgroundVideo(int sourceIndex, bool shouldLoop);
 	void RequestForegroundVideo(int index);
 	void AdvanceSequence();
+	void StartNetworkManager(const std::string& serverIP, int serverPort);
 
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 	LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
