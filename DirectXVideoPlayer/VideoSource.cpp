@@ -114,57 +114,96 @@ bool VideoSource::OpenFile(const std::string& path, ID3D11Device* device, ID3D11
 }
 
 /*
-Responsible for managing the decoding loop, converting raw packets from the video stream into displayable DirectX textures while handling timing and looping.
+Responsible for managing the decoding loop, converting raw packets from the video stream into displayable DirectX textures 
+while handling timing and looping
 */
 bool VideoSource::GetNextFrame(ID3D11DeviceContext* context)
 {
+    //If the video file hasn't been opened yet, it exits immediately
     if (!isInitialized)
-        return true; // No frames to decode yet, but not an error
+        return true;
 
+    //Get the current system runtime in seconds
     double currentTime = GetTimeStd();
 
+    //If startTime is 0 or negative, it means this specific video source has not been told to start playing yet
     if (startTime <= 0)
         return true;
 
+    //Calculates the playback position (playPos) by subtracting the video's launch time (startTime) from the 
+    //current system time. This tells the player how far into the video it should be right now
     double playPos = currentTime - startTime;
 
+    //Holds raw, compressed data read from the file container
     AVPacket* raw_packet = av_packet_alloc();
+    //An empty destination container that will hold the uncompressed picture data after decoding
     AVFrame* frame = av_frame_alloc();
+    //A boolean flag initialized to false that will track whether we successfully extract an actual image frame
     bool frameDecoded = false;
 
+    //If playPos is greater than lastPTS, it means the application's clock has moved forward past the current frame, 
+    //and it is time to parse and decode the next image from the video file.
     if (playPos > lastPTS)
     {
+        //Loop that will keep extracting and parsing packets until an actual video frame is fully generated and decoded
         while (!frameDecoded)
         {
+            //read the next raw packet out of the video file container (fmtCtx) and stores it in raw_packet
             if (av_read_frame(fmtCtx, raw_packet) >= 0)
             {
+                //Checks if the packet we just read belongs to our primary video track (streamIdx)
                 if (raw_packet->stream_index == streamIdx)
                 {
+                    //Pushes the compressed raw video packet into the decoder context (decCtx)
+                    //Returning 0 means the decoder successfully accepted the raw packet
                     if (avcodec_send_packet(decCtx, raw_packet) == 0)
                     {
+                        //FRAME FULLY DECODED
+                        //Attempts to retrieve an uncompressed, decoded image frame back from the decoder. 
                         if (avcodec_receive_frame(decCtx, frame) == 0)
                         {
+                            //Calculates the exact playback timestamp of the decoded frame in seconds.
                             internalPTS = frame->best_effort_timestamp * av_q2d(fmtCtx->streams[streamIdx]->time_base);
+
+                            //Performs a GPU-side copy transferring the decoded image from the decoder into our 
+                            //DirectX 11 textures (srvY and srvUV) for rendering
                             CopyFrameToDX11Texture(context, frame);
+
+                            //lastPTS to match our current playback clock location so we know what time marker is now on screen
                             lastPTS = playPos;
+
+							//Tells that a frame has been decoded allowing the main loop to proceed with rendering it
                             frameDecoded = true;
+
+                            //Takes a nanosecond system snapshot at the exact moment this background frame was processed. 
+							//This timestamp is stored in an atomic variable so to be used by NetworkManger when sending positions
+                            //allowing for better synchronization between video playback and network transmission.
                             bg_capture_time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 std::chrono::steady_clock::now().time_since_epoch()).count();
                         }
                     }
                 }
+                //Relase the raw packet memory
                 av_packet_unref(raw_packet);
             }
+			//END OF THE VIDEO FILE REACHED
             else
             {
+                //If the video has to loop...
                 if (looped)
                 {
+                    //Calls Rewind() to clear the decoder buffer and seek back to frame 0
                     Rewind();
+                    //Restarts the playback 
                     Play(GetTimeStd());
-                    frameDecoded = true; // Allow loop to start immediately 
+                    //Forces frameDecoded = true so the application can immediately transition back into the first frame
+                    frameDecoded = true;
                 }
+                //if the video is not set to loop...
                 else
                 {
+					//Just clear frame and raw packet memory and exit the loop, leaving the last frame on screen until 
+                    //the application decides to play or rewind again
                     av_frame_free(&frame);
                     av_packet_free(&raw_packet);
                     return false;
@@ -173,36 +212,61 @@ bool VideoSource::GetNextFrame(ID3D11DeviceContext* context)
         }
     }
 
+    //Frees the local frame and raw_packet pointers allocated at the top of the function to clean up heap allocations
     av_frame_free(&frame);
     av_packet_free(&raw_packet);
 
+    //Returns the value of frameDecoded (true if a new frame was successfully loaded or if a loop cycle was forced).
     return frameDecoded;
 }
 
+/*
+Establish the starting time for a specific video stream so that the decoding loop (GetNextFrame) can track precisely 
+when to decode and display incoming frames.
+*/
 void VideoSource::Play(double startTime)
 {
     this->startTime = startTime;
     internalPTS = 0.0;
-    lastPTS = -1.0; // Reset lastPTS to allow immediate frame decoding
+
+    //By resetting lastPTS to -1.0, any valid playback time (playPos >= 0.0) is guaranteed to be greater than lastPTS. 
+    //This forces the FFmpeg/DirectX pipeline to immediately pass the conditional check and decode the very first frame 
+    //of the video on the next frame loop, preventing an initial lag or rendering delay.
+    lastPTS = -1.0;
 }
 
+/*
+Responsible for resetting a video stream back to its absolute beginning (frame 0) and flushing out any stale, cached frames 
+from the hardware decoder.
+*/
 void VideoSource::Rewind()
 {
     if (!isInitialized)
         return;
 
+    //Completely wipe the internal processing buffers of the decoder context
     avcodec_flush_buffers(decCtx);
+	//Instructs FFmpeg to change its read pointer inside the video container file (fmtCtx) 
+    //back to the very first frame (timestamp 0)
     av_seek_frame(fmtCtx, streamIdx, 0, AVSEEK_FLAG_BACKWARD);
+
     lastPTS = -1.0;
     internalPTS = 0.0;
 }
 
+/*
+Responsible for dynamically calculating the opacity of a foreground video frame at any given moment in its playback timeline
+*/
 float VideoSource::ComputeAlpha()
 {
+    //Resets the video alpha to a default state of 1.0f. 
+    //If the video is not currently within its fade-in or its fade-out window, it will remain fully visible
     alpha = 1.0f;
 
+    //Checks to see if the video has already finished its initial entry fade in
     if (!fadeInComplete)
     {
+
         if (internalPTS < fadeInDuration)
         {
             alpha = (float)internalPTS / fadeInDuration;
@@ -211,6 +275,8 @@ float VideoSource::ComputeAlpha()
         fadeInComplete = true;
     }
 
+    //isSequenceLoop - Verifies that the video isn't currently set to repeat inside an automated sequential playlist. 
+    //(If a video is supposed to loop seamlessly back to the beginning, you don't want it fading to black at the end of its timeline).
     if (!isSequenceLoop && (duration - internalPTS < fadeOutDuration))
     {
         alpha = (float)(duration - internalPTS) / fadeOutDuration;
